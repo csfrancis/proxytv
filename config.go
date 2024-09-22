@@ -61,15 +61,22 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("invalid epgUrl: %w", err)
 	}
 
-	for i, filter := range config.Filters {
-		re, err := regexp.Compile(filter.Value)
-		if err != nil {
-			return nil, fmt.Errorf("invalid regular expression in filter %d: %w", i, err)
-		}
-		config.Filters[i].regexp = re
+	if err := config.compileFilterRegexps(); err != nil {
+		return nil, err
 	}
 
 	return config, nil
+}
+
+func (c *Config) compileFilterRegexps() error {
+	for i, filter := range c.Filters {
+		re, err := regexp.Compile(filter.Value)
+		if err != nil {
+			return fmt.Errorf("invalid regular expression in filter %d: %w", i, err)
+		}
+		c.Filters[i].regexp = re
+	}
+	return nil
 }
 
 func validateFileOrURL(input string) error {
