@@ -1,0 +1,114 @@
+package proxytv
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+
+	log "github.com/sirupsen/logrus"
+)
+
+type Handler interface {
+	OnPlaylistStart()
+	OnTrack(track Track)
+	OnPlaylistEnd()
+	OnError(err error)
+}
+
+type Track struct {
+	Name       string
+	Length     float64
+	URI        *url.URL
+	Tags       map[string]string
+	Raw        string
+	LineNumber int
+}
+
+func Decode(r io.Reader, handler Handler) {
+	scanner := bufio.NewScanner(r)
+	lineNum := 0
+	var currentTrack *Track
+
+	handler.OnPlaylistStart()
+
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+
+		if lineNum == 1 && !strings.HasPrefix(line, "#EXTM3U") {
+			handler.OnError(fmt.Errorf("malformed M3U provided"))
+			return
+		}
+
+		switch {
+		case strings.HasPrefix(line, "#EXTINF:"):
+			if currentTrack != nil {
+				handler.OnTrack(*currentTrack)
+			}
+			currentTrack = &Track{
+				Raw:        line,
+				LineNumber: lineNum,
+			}
+			currentTrack.Length, currentTrack.Name, currentTrack.Tags = decodeInfoLine(line)
+
+		case IsUrl(line):
+			if currentTrack == nil {
+				handler.OnError(fmt.Errorf("URL found without preceding EXTINF at line %d", lineNum))
+				return
+			}
+			uri, _ := url.Parse(line)
+			currentTrack.URI = uri
+			handler.OnTrack(*currentTrack)
+			currentTrack = nil
+		}
+	}
+
+	if currentTrack != nil {
+		handler.OnTrack(*currentTrack)
+	}
+
+	if err := scanner.Err(); err != nil {
+		handler.OnError(err)
+		return
+	}
+
+	handler.OnPlaylistEnd()
+}
+
+func IsUrl(str string) bool {
+	u, err := url.Parse(str)
+	return err == nil && u.Scheme != "" && u.Host != ""
+}
+
+var infoRegex = regexp.MustCompile(`([^\s="]+)=(?:"(.*?)"|(\d+))(?:,([.*^,]))?|#EXTINF:(-?\d*\s*)|,(.*)`)
+
+func decodeInfoLine(line string) (float64, string, map[string]string) {
+	matches := infoRegex.FindAllStringSubmatch(line, -1)
+	var err error
+	durationFloat := 0.0
+	durationStr := strings.TrimSpace(matches[0][len(matches[0])-2])
+	if durationStr != "-1" && len(durationStr) > 0 {
+		if durationFloat, err = strconv.ParseFloat(durationStr, 64); err != nil {
+			log.Panic(fmt.Errorf("duration parsing error: %s", err))
+		}
+	}
+
+	titleIndex := len(matches) - 1
+	title := matches[titleIndex][len(matches[titleIndex])-1]
+
+	keyMap := make(map[string]string)
+
+	for _, match := range matches[1 : len(matches)-1] {
+		val := match[2]
+		if val == "" {
+			val = match[3]
+		}
+		keyMap[strings.ToLower(match[1])] = val
+	}
+
+	return durationFloat, title, keyMap
+}
