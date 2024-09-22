@@ -51,12 +51,19 @@ func (s *Server) getIptvM3u() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) getEpgXml() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Data(200, "application/xml", []byte(s.provider.GetEpgXml()))
+	}
+}
+
 func (s *Server) Start(p *Provider) {
 	s.router.GET("/ping", func(c *gin.Context) {
 		c.String(200, "PONG")
 	})
 
 	s.router.GET("/get.php", s.getIptvM3u())
+	s.router.GET("/xmltv.php", s.getEpgXml())
 
 	s.server = &http.Server{
 		Addr:    s.listenAddress,

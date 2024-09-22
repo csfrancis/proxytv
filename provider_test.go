@@ -8,12 +8,27 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func createTempFile(content string, pattern string) (*os.File, error) {
+	tmpFile, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return nil, err
+	}
+	_, err = tmpFile.WriteString(content)
+	if err != nil {
+		tmpFile.Close()
+		return nil, err
+	}
+	tmpFile.Close()
+	return tmpFile, nil
+}
+
 func TestProviderLoad(t *testing.T) {
 	tests := []struct {
 		name        string
 		config      *Config
 		m3uContent  string
 		expectedM3u string
+		epgContent  string
 		wantErr     bool
 	}{
 		{
@@ -33,6 +48,9 @@ http://example.com/channel2`,
 http://example.com/channel1
 #EXTINF:-1 tvg-id="id2" tvg-name="name2",Channel 2
 http://example.com/channel2
+`,
+			epgContent: `<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
 `,
 			wantErr: false,
 		},
@@ -62,6 +80,9 @@ http://example.com/channel2`,
 #EXTINF:-1 tvg-id="id2" tvg-name="name2",Channel 2
 http://example.com/channel2
 `,
+			epgContent: `<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+`,
 			wantErr: false,
 		},
 		{
@@ -84,24 +105,30 @@ http://test.com:6078/channel/0
 #EXTINF:-1 tvg-id="id2" tvg-name="name2",Channel 2
 http://test.com:6078/channel/1
 `,
+			epgContent: `<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+`,
 			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a temporary file
-			tmpFile, err := os.CreateTemp("", "test_m3u_*.m3u")
-			assert.NoError(t, err)
+			// Create a temporary file for m3u content
+			tmpFile, err := createTempFile(tt.m3uContent, "test_m3u_*.m3u")
+			if err != nil {
+				t.Fatalf("Failed to create temporary file: %v", err)
+			}
 			defer os.Remove(tmpFile.Name())
-
-			// Write the M3U content to the temporary file
-			_, err = tmpFile.WriteString(tt.m3uContent)
-			assert.NoError(t, err)
-			tmpFile.Close()
-
 			// Set the IPTVUrl to the temporary file path
 			tt.config.IPTVUrl = filepath.ToSlash(tmpFile.Name())
+
+			tmpFile, err = createTempFile(tt.epgContent, "test_epg_*.xml")
+			if err != nil {
+				t.Fatalf("Failed to create temporary file: %v", err)
+			}
+			defer os.Remove(tmpFile.Name())
+			tt.config.EPGUrl = filepath.ToSlash(tmpFile.Name())
 
 			tt.config.compileFilterRegexps()
 			provider, err := NewProvider(tt.config)

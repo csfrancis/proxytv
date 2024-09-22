@@ -1,6 +1,7 @@
 package proxytv
 
 import (
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/csfrancis/proxytv/xmltv"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -21,6 +24,8 @@ type Provider struct {
 	tracks     []track
 	priorities map[string]int
 	m3uData    strings.Builder
+	epg        *xmltv.TV
+	epgData    []byte
 }
 
 func loadReader(uri string) io.ReadCloser {
@@ -160,23 +165,118 @@ func NewProvider(config *Config) (*Provider, error) {
 	return provider, nil
 }
 
+func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
+	channels := make(map[string]bool)
+	for _, track := range p.tracks {
+		id := track.Tags["tvg-id"]
+		if len(id) == 0 {
+			continue
+		}
+		channels[id] = true
+	}
+
+	decoder := xml.NewDecoder(reader)
+	tvSetup := new(xmltv.TV)
+
+	for {
+		// Decode the next XML token
+		tok, err := decoder.Token()
+		if err != nil {
+			break // Exit on EOF or error
+		}
+
+		// Process the start element
+		switch se := tok.(type) {
+		case xml.StartElement:
+			switch se.Name.Local {
+			case "tv":
+				for _, attr := range se.Attr {
+					switch attr.Name.Local {
+					case "date":
+						tvSetup.Date = attr.Value
+					case "source-info-url":
+						tvSetup.SourceInfoURL = attr.Value
+					case "source-info-name":
+						tvSetup.SourceInfoName = attr.Value
+					case "source-data-url":
+						tvSetup.SourceDataURL = attr.Value
+					case "generator-info-name":
+						tvSetup.GeneratorInfoName = attr.Value
+					case "generator-info-url":
+						tvSetup.GeneratorInfoURL = attr.Value
+					}
+				}
+			case "programme":
+				var programme xmltv.Programme
+				err := decoder.DecodeElement(&programme, &se)
+				if err != nil {
+					return nil, err
+				}
+				if channels[programme.Channel] {
+					tvSetup.Programmes = append(tvSetup.Programmes, programme)
+				}
+			case "channel":
+				var channel xmltv.Channel
+				err := decoder.DecodeElement(&channel, &se)
+				if err != nil {
+					return nil, err
+				}
+				if channels[channel.ID] {
+					tvSetup.Channels = append(tvSetup.Channels, channel)
+				}
+			}
+		}
+	}
+
+	log.WithField("channelCount", len(tvSetup.Channels)).WithField("programmeCount", len(tvSetup.Programmes)).Info("loaded xmltv")
+
+	return tvSetup, nil
+}
+
 func (p *Provider) Refresh() error {
+	var err error
 	log.WithField("url", p.iptvUrl).Info("loading IPTV m3u")
 
 	start := time.Now()
 	iptvReader := loadReader(p.iptvUrl)
 	defer iptvReader.Close()
-
 	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
 
-	err := decodeM3u(iptvReader, p)
+	err = decodeM3u(iptvReader, p)
 	if err != nil {
 		return err
 	}
+	log.WithField("channelCount", len(p.tracks)).Info("parsed IPTV m3u")
+
+	log.WithField("url", p.epgUrl).Info("loading EPG")
+
+	start = time.Now()
+	epgReader := loadReader(p.epgUrl)
+	defer epgReader.Close()
+	log.WithField("duration", time.Since(start)).Debug("loaded EPG")
+
+	p.epg, err = p.loadXmlTv(epgReader)
+	if err != nil {
+		return err
+	}
+
+	log.WithField("channelCount", len(p.epg.Channels)).WithField("programmeCount", len(p.epg.Programmes)).Info("parsed EPG")
+
+	xmlData, err := xml.Marshal(p.epg)
+	if err != nil {
+		return err
+	}
+
+	xmlHeader := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE tv SYSTEM \"xmltv.dtd\">")
+	p.epgData = append(xmlHeader, xmlData...)
 
 	return nil
 }
 
 func (p *Provider) GetM3u() string {
 	return p.m3uData.String()
+}
+
+func (p *Provider) GetEpgXml() string {
+	return string(p.epgData)
 }
