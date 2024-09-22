@@ -20,15 +20,15 @@ func (f *Filter) GetRegexp() *regexp.Regexp {
 }
 
 type Config struct {
-	LogLevel string `yaml:"logLevel"`
+	LogLevel string `yaml:"logLevel,omitempty" default:"info"`
 	IPTVUrl  string `yaml:"iptvUrl"`
 	EPGUrl   string `yaml:"epgUrl"`
 
-	ListenAddress string `yaml:"listenAddress"`
+	ListenAddress string `yaml:"listenAddress,omitempty" default:"localhost:6078"`
 	BaseAddress   string `yaml:"baseAddress"`
 
-	UseFFMPEG  bool `yaml:"ffmpeg"`
-	MaxStreams int  `yaml:"maxStreams"`
+	UseFFMPEG  bool `yaml:"ffmpeg,omitempty" default:"false"`
+	MaxStreams int  `yaml:"maxStreams,omitempty" default:"1"`
 
 	Filters []*Filter `yaml:"filters"`
 }
@@ -47,7 +47,20 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	// Compile regular expressions for filters
+	if config.IPTVUrl == "" {
+		return nil, fmt.Errorf("iptvUrl is required")
+	}
+	if config.EPGUrl == "" {
+		return nil, fmt.Errorf("epgUrl is required")
+	}
+
+	if err := validateFileOrURL(config.IPTVUrl); err != nil {
+		return nil, fmt.Errorf("invalid iptvUrl: %w", err)
+	}
+	if err := validateFileOrURL(config.EPGUrl); err != nil {
+		return nil, fmt.Errorf("invalid epgUrl: %w", err)
+	}
+
 	for i, filter := range config.Filters {
 		re, err := regexp.Compile(filter.Value)
 		if err != nil {
@@ -57,4 +70,18 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return config, nil
+}
+
+func validateFileOrURL(input string) error {
+	// Check if it's a file
+	if _, err := os.Stat(input); err == nil {
+		return nil
+	}
+
+	// Check if it's a URL
+	if matched, _ := regexp.MatchString(`^https?://`, input); matched {
+		return nil
+	}
+
+	return fmt.Errorf("not a valid file path or URL")
 }
