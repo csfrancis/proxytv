@@ -2,24 +2,22 @@ package proxytv
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 )
 
-type Handler interface {
+type m3uHandler interface {
 	OnPlaylistStart()
-	OnTrack(track Track)
+	OnTrack(track track)
 	OnPlaylistEnd()
-	OnError(err error)
 }
 
-type Track struct {
+type track struct {
 	Name       string
 	Length     float64
 	URI        *url.URL
@@ -28,10 +26,13 @@ type Track struct {
 	LineNumber int
 }
 
-func Decode(r io.Reader, handler Handler) {
+var errMalformedM3U = errors.New("malformed M3U provided")
+var errMissingExtinf = errors.New("URL found without preceding EXTINF")
+
+func decodeM3u(r io.Reader, handler m3uHandler) error {
 	scanner := bufio.NewScanner(r)
 	lineNum := 0
-	var currentTrack *Track
+	var currentTrack *track
 
 	handler.OnPlaylistStart()
 
@@ -40,8 +41,7 @@ func Decode(r io.Reader, handler Handler) {
 		line := strings.TrimSpace(scanner.Text())
 
 		if lineNum == 1 && !strings.HasPrefix(line, "#EXTM3U") {
-			handler.OnError(fmt.Errorf("malformed M3U provided"))
-			return
+			return errMalformedM3U
 		}
 
 		switch {
@@ -49,16 +49,19 @@ func Decode(r io.Reader, handler Handler) {
 			if currentTrack != nil {
 				handler.OnTrack(*currentTrack)
 			}
-			currentTrack = &Track{
+			currentTrack = &track{
 				Raw:        line,
 				LineNumber: lineNum,
 			}
-			currentTrack.Length, currentTrack.Name, currentTrack.Tags = decodeInfoLine(line)
+			var err error
+			currentTrack.Length, currentTrack.Name, currentTrack.Tags, err = decodeInfoLine(line)
+			if err != nil {
+				return err
+			}
 
-		case IsUrl(line):
+		case isUrl(line):
 			if currentTrack == nil {
-				handler.OnError(fmt.Errorf("URL found without preceding EXTINF at line %d", lineNum))
-				return
+				return errMissingExtinf
 			}
 			uri, _ := url.Parse(line)
 			currentTrack.URI = uri
@@ -72,28 +75,29 @@ func Decode(r io.Reader, handler Handler) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		handler.OnError(err)
-		return
+		return err
 	}
 
 	handler.OnPlaylistEnd()
+
+	return nil
 }
 
-func IsUrl(str string) bool {
+func isUrl(str string) bool {
 	u, err := url.Parse(str)
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
 var infoRegex = regexp.MustCompile(`([^\s="]+)=(?:"(.*?)"|(\d+))(?:,([.*^,]))?|#EXTINF:(-?\d*\s*)|,(.*)`)
 
-func decodeInfoLine(line string) (float64, string, map[string]string) {
+func decodeInfoLine(line string) (float64, string, map[string]string, error) {
 	matches := infoRegex.FindAllStringSubmatch(line, -1)
 	var err error
 	durationFloat := 0.0
 	durationStr := strings.TrimSpace(matches[0][len(matches[0])-2])
 	if durationStr != "-1" && len(durationStr) > 0 {
 		if durationFloat, err = strconv.ParseFloat(durationStr, 64); err != nil {
-			log.Panic(fmt.Errorf("duration parsing error: %s", err))
+			return 0, "", nil, fmt.Errorf("duration parsing error: %s", err)
 		}
 	}
 
@@ -110,5 +114,5 @@ func decodeInfoLine(line string) (float64, string, map[string]string) {
 		keyMap[strings.ToLower(match[1])] = val
 	}
 
-	return durationFloat, title, keyMap
+	return durationFloat, title, keyMap, nil
 }

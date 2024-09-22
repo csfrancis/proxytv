@@ -32,4 +32,13 @@ func main() {
 
 	log.Infof("starting proxytv with config file: %s", *configPath)
 
+	provider, err := proxytv.NewProvider(config)
+	if err != nil {
+		log.Fatalf("failed to create provider: %v", err)
+	}
+
+	err = provider.Load()
+	if err != nil {
+		log.Fatalf("failed to load provider: %v", err)
+	}
 }
