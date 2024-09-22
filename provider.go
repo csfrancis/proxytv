@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -159,8 +160,15 @@ func NewProvider(config *Config) (*Provider, error) {
 	return provider, nil
 }
 
-func (p *Provider) Load() error {
+func (p *Provider) Refresh() error {
+	log.WithField("url", p.iptvUrl).Info("loading IPTV m3u")
+
+	start := time.Now()
 	iptvReader := loadReader(p.iptvUrl)
+	defer iptvReader.Close()
+
+	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
+
 	err := decodeM3u(iptvReader, p)
 	if err != nil {
 		return err

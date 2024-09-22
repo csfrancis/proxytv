@@ -107,7 +107,7 @@ http://test.com:6078/channel/1
 			provider, err := NewProvider(tt.config)
 			assert.NoError(t, err)
 
-			err = provider.Load()
+			err = provider.Refresh()
 
 			if tt.wantErr {
 				assert.Error(t, err)
