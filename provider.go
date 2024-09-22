@@ -12,9 +12,10 @@ import (
 )
 
 type Provider struct {
-	iptvUrl string
-	epgUrl  string
-	filters []*Filter
+	iptvUrl     string
+	epgUrl      string
+	baseAddress string
+	filters     []*Filter
 
 	tracks     []track
 	priorities map[string]int
@@ -130,20 +131,32 @@ func (p *Provider) OnPlaylistEnd() {
 		return priorityI < priorityJ
 	})
 
+	rewriteUrl := len(p.baseAddress) > 0
+
 	for i := range len(p.tracks) {
 		track := p.tracks[i]
-		p.m3uData.WriteString(fmt.Sprintf("%s\n%s\n", track.Raw, track.URI))
+		uri := track.URI.String()
+		if rewriteUrl {
+			uri = fmt.Sprintf("http://%s/channel/%d", p.baseAddress, i)
+		}
+		p.m3uData.WriteString(fmt.Sprintf("%s\n%s\n", track.Raw, uri))
 	}
 }
 
 func NewProvider(config *Config) (*Provider, error) {
-	return &Provider{
+	provider := &Provider{
 		iptvUrl:    config.IPTVUrl,
 		epgUrl:     config.EPGUrl,
 		filters:    config.Filters,
 		tracks:     make([]track, 0, len(config.Filters)),
 		priorities: make(map[string]int),
-	}, nil
+	}
+
+	if config.UseFFMPEG {
+		provider.baseAddress = config.BaseAddress
+	}
+
+	return provider, nil
 }
 
 func (p *Provider) Load() error {

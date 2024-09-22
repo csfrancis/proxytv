@@ -64,6 +64,28 @@ http://example.com/channel2
 `,
 			wantErr: false,
 		},
+		{
+			name: "Filtered valid M3U content",
+			config: &Config{
+				Filters: []*Filter{
+					{Type: "id", Value: ".*"},
+				},
+				UseFFMPEG:   true,
+				BaseAddress: "test.com:6078",
+			},
+			m3uContent: `#EXTM3U
+#EXTINF:-1 tvg-id="id1" tvg-name="name1",Channel 1
+http://example.com/channel1
+#EXTINF:-1 tvg-id="id2" tvg-name="name2",Channel 2
+http://example.com/channel2`,
+			expectedM3u: `#EXTM3U
+#EXTINF:-1 tvg-id="id1" tvg-name="name1",Channel 1
+http://test.com:6078/channel/0
+#EXTINF:-1 tvg-id="id2" tvg-name="name2",Channel 2
+http://test.com:6078/channel/1
+`,
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
