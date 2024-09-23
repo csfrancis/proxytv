@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/csfrancis/proxytv"
 
@@ -46,6 +47,10 @@ func (h *SafeUrlHook) Fire(entry *log.Entry) error {
 
 	}
 	return nil
+}
+
+func init() {
+	proxytv.SetGinMode()
 }
 
 func main() {
@@ -91,11 +96,27 @@ func main() {
 		log.Fatalf("failed to create server: %v", err)
 	}
 
-	server.Start(provider)
+	errChan := server.Start(provider)
 
-	<-stop
+	refreshTicker := time.NewTicker(config.RefreshInterval)
+	defer refreshTicker.Stop()
 
-	log.Info("shutting down")
+	exit := false
+
+	for !exit {
+		select {
+		case err := <-errChan:
+			log.Fatalf("server error: %v", err)
+		case <-stop:
+			log.Info("shutting down")
+			exit = true
+		case <-refreshTicker.C:
+			log.Info("refreshing provider")
+			if err := provider.Refresh(); err != nil {
+				log.WithError(err).Error("failed to refresh provider")
+			}
+		}
+	}
 
 	server.Stop()
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -17,6 +18,7 @@ iptvUrl: http://example.com/iptv
 epgUrl: http://example.com/epg
 listenAddress: localhost:8080
 baseAddress: iptvserver:8080
+refreshInterval: '2h'
 ffmpeg: true
 maxStreams: 10
 filters:
@@ -57,6 +59,7 @@ filters:
 		assert.Equal(t, "news|weather", config.Filters[1].Value)
 		assert.Equal(t, "exclude", config.Filters[1].Type)
 		assert.NotNil(t, config.Filters[1].GetRegexp())
+		assert.Equal(t, 2*time.Hour, config.RefreshInterval)
 	})
 
 	// Test with invalid regular expression

@@ -1,0 +1,8 @@
+{
+  "gopls": {
+    "build.buildFlags": [
+      "-tags=debug",
+    ],
+
+  }
+}

@@ -168,6 +168,18 @@ func split(data []byte, atEOF bool) (advance int, token []byte, spliterror error
 	return 0, nil, nil
 }
 
+func (s *Server) refresh() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		log.Info("refreshing provider")
+		if err := s.provider.Refresh(); err != nil {
+			log.WithError(err).Error("error refreshing provider")
+			c.String(500, "Error refreshing provider")
+			return
+		}
+		c.String(200, "OK")
+	}
+}
+
 func (s *Server) streamChannel() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelIdParam := c.Param("channelId")
@@ -194,7 +206,7 @@ func (s *Server) streamChannel() gin.HandlerFunc {
 	}
 }
 
-func (s *Server) Start(p *Provider) {
+func (s *Server) Start(p *Provider) chan error {
 	s.router.GET("/ping", func(c *gin.Context) {
 		c.String(200, "PONG")
 	})
@@ -202,6 +214,7 @@ func (s *Server) Start(p *Provider) {
 	s.router.GET("/get.php", s.getIptvM3u())
 	s.router.GET("/xmltv.php", s.getEpgXml())
 	s.router.GET("/channel/:channelId", s.streamChannel())
+	s.router.PUT("/refresh", s.refresh())
 
 	s.server = &http.Server{
 		Addr:    s.listenAddress,
@@ -210,11 +223,16 @@ func (s *Server) Start(p *Provider) {
 
 	log.WithField("listenAddress", s.listenAddress).Info("starting http server")
 
+	errChan := make(chan error, 1)
+
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.WithError(err).Error("failed to listen and serve")
+			errChan <- err
 		}
 	}()
+
+	return errChan
 }
 
 func (s *Server) Stop() error {

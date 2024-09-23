@@ -18,8 +18,8 @@ func (m *mockHandler) OnPlaylistStart() {
 	m.playlistStartCalled = true
 }
 
-func (m *mockHandler) OnTrack(t Track) {
-	m.tracks = append(m.tracks, t)
+func (m *mockHandler) OnTrack(t *Track) {
+	m.tracks = append(m.tracks, *t)
 }
 
 func (m *mockHandler) OnPlaylistEnd() {
@@ -80,7 +80,7 @@ http://example.com/channel1`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := &mockHandler{}
-			err := decodeM3u(strings.NewReader(tt.input), handler)
+			err := loadM3u(strings.NewReader(tt.input), handler)
 
 			if tt.wantErr {
 				assert.Error(t, err)

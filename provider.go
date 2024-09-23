@@ -15,17 +15,118 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type Provider struct {
-	iptvUrl     string
-	epgUrl      string
+type playlistLoader struct {
 	baseAddress string
 	filters     []*Filter
 
 	tracks     []Track
 	priorities map[string]int
-	m3uData    strings.Builder
-	epg        *xmltv.TV
-	epgData    []byte
+	m3u        strings.Builder
+}
+
+func newPlaylistLoader(baseAddress string, filters []*Filter) *playlistLoader {
+	return &playlistLoader{
+		baseAddress: baseAddress,
+		filters:     filters,
+		tracks:      make([]Track, 0, len(filters)),
+		priorities:  make(map[string]int),
+	}
+}
+
+func (pl *playlistLoader) findIndexWithId(track *Track) int {
+	id := track.Tags["tvg-id"]
+	if len(id) == 0 {
+		return -1
+	}
+
+	for i := range pl.tracks {
+		if pl.tracks[i].Tags["tvg-id"] == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (pl *playlistLoader) OnPlaylistStart() {
+	pl.m3u.Reset()
+	pl.m3u.WriteString("#EXTM3U\n")
+}
+
+func (pl *playlistLoader) OnTrack(track *Track) {
+	for i, filter := range pl.filters {
+		var field string
+		switch filter.Type {
+		case "id":
+			field = "tvg-id"
+		case "group":
+			field = "group-title"
+		case "name":
+			field = "tvg-name"
+		default:
+			log.WithField("type", filter.Type).Panic("invalid filter type")
+		}
+
+		val := track.Tags[field]
+		if len(val) == 0 {
+			continue
+		}
+
+		if filter.regexp.Match([]byte(val)) {
+			name := track.Name
+
+			if len(track.Tags["tvg-id"]) == 0 {
+				log.WithField("track", track).Warn("missing tvg-id")
+			}
+
+			if existingPriority, exists := pl.priorities[name]; !exists || i < existingPriority {
+				idx := pl.findIndexWithId(track)
+				if idx != -1 {
+					if strings.Contains(track.Name, "HD") {
+						delete(pl.priorities, pl.tracks[idx].Name)
+						pl.tracks[idx] = *track
+					} else {
+						continue
+					}
+				} else {
+					if !exists {
+						pl.tracks = append(pl.tracks, *track)
+					}
+				}
+				pl.priorities[name] = i
+			} else if exists {
+				log.WithField("track", track).Warn("duplicate name")
+			}
+		}
+	}
+}
+
+func (pl *playlistLoader) OnPlaylistEnd() {
+	sort.SliceStable(pl.tracks, func(i, j int) bool {
+		priorityI, existsI := pl.priorities[pl.tracks[i].Name]
+		priorityJ, existsJ := pl.priorities[pl.tracks[j].Name]
+
+		if !existsI && !existsJ {
+			return false // Keep original order for unmatched elements
+		}
+		if !existsI {
+			return false // Unmatched elements go to the end
+		}
+		if !existsJ {
+			return true // Matched elements come before unmatched ones
+		}
+		return priorityI < priorityJ
+	})
+
+	rewriteUrl := len(pl.baseAddress) > 0
+
+	for i := range len(pl.tracks) {
+		track := pl.tracks[i]
+		uri := track.URI.String()
+		if rewriteUrl {
+			uri = fmt.Sprintf("http://%s/channel/%d", pl.baseAddress, i)
+		}
+		pl.m3u.WriteString(fmt.Sprintf("%s\n%s\n", track.Raw, uri))
+	}
 }
 
 func loadReader(uri string) io.ReadCloser {
@@ -53,109 +154,22 @@ func loadReader(uri string) io.ReadCloser {
 	return reader
 }
 
-func (p *Provider) findIndexWithId(track Track) int {
-	id := track.Tags["tvg-id"]
-	if len(id) == 0 {
-		return -1
-	}
+type Provider struct {
+	iptvUrl     string
+	epgUrl      string
+	baseAddress string
+	filters     []*Filter
 
-	for i := range p.tracks {
-		if p.tracks[i].Tags["tvg-id"] == id {
-			return i
-		}
-	}
-	return -1
-}
-
-func (p *Provider) OnPlaylistStart() {
-	p.m3uData.Reset()
-	p.m3uData.WriteString("#EXTM3U\n")
-}
-
-func (p *Provider) OnTrack(track Track) {
-	for i, filter := range p.filters {
-		var field string
-		switch filter.Type {
-		case "id":
-			field = "tvg-id"
-		case "group":
-			field = "group-title"
-		case "name":
-			field = "tvg-name"
-		default:
-			log.WithField("type", filter.Type).Panic("invalid filter type")
-		}
-
-		val := track.Tags[field]
-		if len(val) == 0 {
-			continue
-		}
-
-		if filter.regexp.Match([]byte(val)) {
-			name := track.Name
-
-			if len(track.Tags["tvg-id"]) == 0 {
-				log.WithField("track", track).Warn("missing tvg-id")
-			}
-
-			if existingPriority, exists := p.priorities[name]; !exists || i < existingPriority {
-				idx := p.findIndexWithId(track)
-				if idx != -1 {
-					if strings.Contains(track.Name, "HD") {
-						delete(p.priorities, p.tracks[idx].Name)
-						p.tracks[idx] = track
-					} else {
-						continue
-					}
-				} else {
-					if !exists {
-						p.tracks = append(p.tracks, track)
-					}
-				}
-				p.priorities[name] = i
-			} else if exists {
-				log.WithField("track", track).Warn("duplicate name")
-			}
-		}
-	}
-}
-
-func (p *Provider) OnPlaylistEnd() {
-	sort.SliceStable(p.tracks, func(i, j int) bool {
-		priorityI, existsI := p.priorities[p.tracks[i].Name]
-		priorityJ, existsJ := p.priorities[p.tracks[j].Name]
-
-		if !existsI && !existsJ {
-			return false // Keep original order for unmatched elements
-		}
-		if !existsI {
-			return false // Unmatched elements go to the end
-		}
-		if !existsJ {
-			return true // Matched elements come before unmatched ones
-		}
-		return priorityI < priorityJ
-	})
-
-	rewriteUrl := len(p.baseAddress) > 0
-
-	for i := range len(p.tracks) {
-		track := p.tracks[i]
-		uri := track.URI.String()
-		if rewriteUrl {
-			uri = fmt.Sprintf("http://%s/channel/%d", p.baseAddress, i)
-		}
-		p.m3uData.WriteString(fmt.Sprintf("%s\n%s\n", track.Raw, uri))
-	}
+	playlist *playlistLoader
+	epg      *xmltv.TV
+	epgData  []byte
 }
 
 func NewProvider(config *Config) (*Provider, error) {
 	provider := &Provider{
-		iptvUrl:    config.IPTVUrl,
-		epgUrl:     config.EPGUrl,
-		filters:    config.Filters,
-		tracks:     make([]Track, 0, len(config.Filters)),
-		priorities: make(map[string]int),
+		iptvUrl: config.IPTVUrl,
+		epgUrl:  config.EPGUrl,
+		filters: config.Filters,
 	}
 
 	if config.UseFFMPEG {
@@ -169,7 +183,7 @@ func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
 	start := time.Now()
 
 	channels := make(map[string]bool)
-	for _, track := range p.tracks {
+	for _, track := range p.playlist.tracks {
 		id := track.Tags["tvg-id"]
 		if len(id) == 0 {
 			continue
@@ -255,11 +269,14 @@ func (p *Provider) Refresh() error {
 	defer iptvReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
 
-	err = decodeM3u(iptvReader, p)
+	pl := newPlaylistLoader(p.baseAddress, p.filters)
+	err = loadM3u(iptvReader, pl)
 	if err != nil {
 		return err
 	}
-	log.WithField("channelCount", len(p.tracks)).Info("parsed IPTV m3u")
+	p.playlist = pl
+
+	log.WithField("channelCount", len(p.playlist.tracks)).Info("parsed IPTV m3u")
 
 	log.WithField("url", p.epgUrl).Info("loading EPG")
 
@@ -285,7 +302,7 @@ func (p *Provider) Refresh() error {
 }
 
 func (p *Provider) GetM3u() string {
-	return p.m3uData.String()
+	return p.playlist.m3u.String()
 }
 
 func (p *Provider) GetEpgXml() string {
@@ -295,8 +312,8 @@ func (p *Provider) GetEpgXml() string {
 var trackNotFound = Track{}
 
 func (p *Provider) GetTrack(idx int) *Track {
-	if idx >= len(p.tracks) {
+	if idx >= len(p.playlist.tracks) {
 		return &trackNotFound
 	}
-	return &p.tracks[idx]
+	return &p.playlist.tracks[idx]
 }

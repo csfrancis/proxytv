@@ -12,27 +12,31 @@ To configure ProxyTV, you need to create a YAML configuration file. Below is an 
 
 ```yaml
 logLevel: "info" # Log level (optional, default: "info")
-iptvUrl: "http://example.com/iptv.m3u" # URL to the IPTV M3U file (required)
-epgUrl: "http://example.com/epg.xml" # URL to the EPG XML file (required)
-listenAddress: "localhost:6078" # Address to listen on (optional, default: "localhost:6078")
+iptvUrl: "http://example.com/get.php?username=XXX&password=XXX&output=ts&type=m3u_plus" # URL to the IPTV M3U file (required)
+epgUrl: "http://example.com/xmltv.php?username=XXX&password=XXX" # URL to the EPG XML file (required)
+listenAddress: "0.0.0.0:6078" # Address to listen on (optional, default: "0.0.0.0:6078")
 baseAddress: "http://localhost:6078" # Base address for the server (required)
+refreshInterval: "12h" # Refresh interval (optional, default: "12h")
 ffmpeg: false # Use FFMPEG for remuxing (optional, default: false)
 maxStreams: 1 # Maximum number of concurrent streams (optional, default: 1)
 filters: # List of filters (optional)
   - filter: "USA \| NFL" # Regular expression filter
     type: "group" # Filter type (name/group/id)
+  - filter: "HBO.*UHD$"
+    type: "name"
 ```
 
 ### Configuration Fields
 
-- `logLevel`: The logging level. Default is "info".
-- `iptvUrl`: The URL to the IPTV M3U file. This field is required.
-- `epgUrl`: The URL to the EPG XML file. This field is required.
-- `listenAddress`: The address the server will listen on. Default is "localhost:6078".
+- `logLevel`: The logging level. Default is "info". Valid values are `debug`, `info`, `warn`, `error`, and `fatal`.
+- `iptvUrl`: The URL or file path to the IPTV M3U file. This field is required.
+- `epgUrl`: The URL or file path to the EPG XML file. This field is required.
+- `listenAddress`: The address the server will listen on. Default is "0.0.0.0:6078".
 - `baseAddress`: The base address for the server. This field is required.
+- `refreshInterval`: The interval at which the provider should be refreshed. Default is "12h".
 - `ffmpeg`: Whether to use FFMPEG for remuxing streams. Default is `false`.
 - `maxStreams`: The maximum number of concurrent streams. Default is `1`.
-- `filters`: A list of filters to include or exclude channels based on regular expressions.
+- `filters`: A list of filters to include channels based on regular expressions.
 
 ## HTTP Endpoints
 
@@ -69,10 +73,6 @@ Make sure to replace `/path/to/your/config.yaml` with the actual path to your co
 ## Logging
 
 ProxyTV uses `logrus` for logging. The log level can be configured in the YAML configuration file using the `logLevel` field.
-
-## HTTP Routing
-
-ProxyTV uses `gin` for HTTP routing. The routes are defined in the `server.go` file.
 
 ## License
 

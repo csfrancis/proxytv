@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 
+	"github.com/creasty/defaults"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,11 +26,14 @@ type Config struct {
 	IPTVUrl  string `yaml:"iptvUrl"`
 	EPGUrl   string `yaml:"epgUrl"`
 
-	ListenAddress string `yaml:"listenAddress,omitempty" default:"localhost:6078"`
+	ListenAddress string `yaml:"listenAddress,omitempty" default:"0.0.0.0:6078"`
 	BaseAddress   string `yaml:"baseAddress"`
 
 	UseFFMPEG  bool `yaml:"ffmpeg,omitempty" default:"false"`
 	MaxStreams int  `yaml:"maxStreams,omitempty" default:"1"`
+
+	RefreshInterval    time.Duration
+	RefreshIntervalStr string `yaml:"refreshInterval,omitempty" default:"12h"`
 
 	Filters []*Filter `yaml:"filters"`
 }
@@ -45,6 +50,15 @@ func LoadConfig(path string) (*Config, error) {
 	err = yaml.Unmarshal(data, config)
 	if err != nil {
 		return nil, err
+	}
+
+	if err = defaults.Set(config); err != nil {
+		return nil, err
+	}
+
+	config.RefreshInterval, err = time.ParseDuration(config.RefreshIntervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid refreshInterval: %w", err)
 	}
 
 	if config.IPTVUrl == "" {

@@ -2,11 +2,11 @@
 
 .PHONY: build
 build: clean
-	go build -o dist/proxytv ./cmd/main.go
+	go build -tags release -o dist/proxytv ./cmd/main.go
 
 .PHONY: linux
 linux: clean dist
-	GOOS=linux GOARCH=arm64 go build -o dist/proxytv ./cmd/main.go
+	GOOS=linux GOARCH=arm64 go build -tags release -o dist/proxytv ./cmd/main.go
 
 .PHONY: dist
 dist:
@@ -19,7 +19,7 @@ setup:
 
 .PHONY: test
 test:
-	go test -v ./...
+	go test -tags debug -v ./...
 
 .PHONY: clean
 clean:
