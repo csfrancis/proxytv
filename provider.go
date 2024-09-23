@@ -21,7 +21,7 @@ type Provider struct {
 	baseAddress string
 	filters     []*Filter
 
-	tracks     []track
+	tracks     []Track
 	priorities map[string]int
 	m3uData    strings.Builder
 	epg        *xmltv.TV
@@ -53,7 +53,7 @@ func loadReader(uri string) io.ReadCloser {
 	return reader
 }
 
-func (p *Provider) findIndexWithId(track track) int {
+func (p *Provider) findIndexWithId(track Track) int {
 	id := track.Tags["tvg-id"]
 	if len(id) == 0 {
 		return -1
@@ -72,7 +72,7 @@ func (p *Provider) OnPlaylistStart() {
 	p.m3uData.WriteString("#EXTM3U\n")
 }
 
-func (p *Provider) OnTrack(track track) {
+func (p *Provider) OnTrack(track Track) {
 	for i, filter := range p.filters {
 		var field string
 		switch filter.Type {
@@ -154,7 +154,7 @@ func NewProvider(config *Config) (*Provider, error) {
 		iptvUrl:    config.IPTVUrl,
 		epgUrl:     config.EPGUrl,
 		filters:    config.Filters,
-		tracks:     make([]track, 0, len(config.Filters)),
+		tracks:     make([]Track, 0, len(config.Filters)),
 		priorities: make(map[string]int),
 	}
 
@@ -166,6 +166,8 @@ func NewProvider(config *Config) (*Provider, error) {
 }
 
 func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
+	start := time.Now()
+
 	channels := make(map[string]bool)
 	for _, track := range p.tracks {
 		id := track.Tags["tvg-id"]
@@ -177,6 +179,9 @@ func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
 
 	decoder := xml.NewDecoder(reader)
 	tvSetup := new(xmltv.TV)
+
+	totalChannelCount := 0
+	totalProgrammeCount := 0
 
 	for {
 		// Decode the next XML token
@@ -215,6 +220,7 @@ func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
 				if channels[programme.Channel] {
 					tvSetup.Programmes = append(tvSetup.Programmes, programme)
 				}
+				totalProgrammeCount++
 			case "channel":
 				var channel xmltv.Channel
 				err := decoder.DecodeElement(&channel, &se)
@@ -224,11 +230,18 @@ func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
 				if channels[channel.ID] {
 					tvSetup.Channels = append(tvSetup.Channels, channel)
 				}
+				totalChannelCount++
 			}
 		}
 	}
 
-	log.WithField("channelCount", len(tvSetup.Channels)).WithField("programmeCount", len(tvSetup.Programmes)).Info("loaded xmltv")
+	log.WithFields(log.Fields{
+		"totalChannelCount":   totalChannelCount,
+		"channelCount":        len(tvSetup.Channels),
+		"totalProgrammeCount": totalProgrammeCount,
+		"programmeCount":      len(tvSetup.Programmes),
+		"duration":            time.Since(start),
+	}).Info("loaded xmltv")
 
 	return tvSetup, nil
 }
@@ -260,8 +273,6 @@ func (p *Provider) Refresh() error {
 		return err
 	}
 
-	log.WithField("channelCount", len(p.epg.Channels)).WithField("programmeCount", len(p.epg.Programmes)).Info("parsed EPG")
-
 	xmlData, err := xml.Marshal(p.epg)
 	if err != nil {
 		return err
@@ -279,4 +290,13 @@ func (p *Provider) GetM3u() string {
 
 func (p *Provider) GetEpgXml() string {
 	return string(p.epgData)
+}
+
+var trackNotFound = Track{}
+
+func (p *Provider) GetTrack(idx int) *Track {
+	if idx >= len(p.tracks) {
+		return &trackNotFound
+	}
+	return &p.tracks[idx]
 }

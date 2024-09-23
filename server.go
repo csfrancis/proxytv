@@ -1,8 +1,17 @@
 package proxytv
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net/http"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +23,9 @@ type Server struct {
 	router        *gin.Engine
 	server        *http.Server
 	provider      *Provider
+	useFfmpeg     bool
+	maxStreams    int
+	streamCount   int
 }
 
 func logrusLogFormatter(param gin.LogFormatterParams) string {
@@ -34,6 +46,8 @@ func NewServer(config *Config, provider *Provider) (*Server, error) {
 		listenAddress: config.ListenAddress,
 		router:        gin.New(),
 		provider:      provider,
+		useFfmpeg:     config.UseFFMPEG,
+		maxStreams:    config.MaxStreams,
 	}
 
 	server.router.Use(gin.LoggerWithFormatter(logrusLogFormatter))
@@ -57,6 +71,129 @@ func (s *Server) getEpgXml() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
+	s.streamCount++
+
+	if s.streamCount > s.maxStreams {
+		log.WithFields(log.Fields{
+			"channelId":   channelId,
+			"streamCount": s.streamCount,
+			"maxStreams":  s.maxStreams,
+		}).Warn("max streams reached")
+		c.String(429, "Too many requests")
+		return
+	}
+
+	logger := log.WithFields(log.Fields{
+		"url":       track.URI.String(),
+		"channelId": channelId,
+	})
+	logger.WithField("streamCount", s.streamCount).Info("remuxing stream")
+
+	run := exec.Command("ffmpeg", "-i", track.URI.String(), "-c:v", "copy", "-f", "mpegts", "pipe:1")
+	logger.WithField("cmd", strings.Join(run.Args, " ")).Debug("executing ffmpeg")
+	ffmpegout, err := run.StdoutPipe()
+	if err != nil {
+		logger.WithError(err).Error("error creating ffmpeg stdout pipe")
+		return
+	}
+
+	stderr, stderrErr := run.StderrPipe()
+	if stderrErr != nil {
+		logger.WithError(stderrErr).Errorln("error creating ffmpeg stderr pipe")
+	}
+
+	if startErr := run.Start(); startErr != nil {
+		log.WithError(startErr).Errorln("error starting ffmpeg")
+		return
+	}
+	defer run.Wait()
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		scanner.Split(split)
+		for scanner.Scan() {
+			log.Debugln(scanner.Text())
+		}
+	}()
+
+	continueStream := true
+	c.Header("Content-Type", `video/mpeg; codecs="avc1.4D401E"`)
+
+	var decrementStreamCount sync.Once
+
+	c.Stream(func(w io.Writer) bool {
+		defer func() {
+			decrementStreamCount.Do(func() {
+				s.streamCount--
+			})
+
+			logger.WithField("streamCount", s.streamCount).Info("stopped streaming")
+			if killErr := run.Process.Kill(); killErr != nil {
+				logger.WithError(killErr).Error("error killing ffmpeg")
+			}
+
+			continueStream = false
+		}()
+
+		if _, copyErr := io.Copy(w, ffmpegout); copyErr != nil && !errors.Is(copyErr, syscall.EPIPE) {
+			logger.WithError(copyErr).Error("error when copying data")
+			continueStream = false
+			return false
+		}
+
+		return continueStream
+	})
+}
+
+func split(data []byte, atEOF bool) (advance int, token []byte, spliterror error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		// We have a full newline-terminated line.
+		return i + 1, data[0:i], nil
+	}
+
+	if i := bytes.IndexByte(data, '\r'); i >= 0 {
+		// We have a cr terminated line
+		return i + 1, data[0:i], nil
+	}
+
+	if atEOF {
+		return len(data), data, nil
+	}
+
+	return 0, nil, nil
+}
+
+func (s *Server) streamChannel() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		channelIdParam := c.Param("channelId")
+		channelId, err := strconv.Atoi(channelIdParam)
+		if err != nil {
+			log.WithError(err).Warn("invalid channelId")
+			c.String(400, "Invalid channel id")
+			return
+		}
+
+		if !s.useFfmpeg {
+			c.String(404, "Channel not found")
+			return
+		}
+
+		track := s.provider.GetTrack(channelId)
+		if track.URI == nil {
+			log.WithField("channelId", channelId).Warn("channel not found")
+			c.String(404, "Channel not found")
+			return
+		}
+
+		s.remuxStream(c, track, channelId)
+	}
+}
+
 func (s *Server) Start(p *Provider) {
 	s.router.GET("/ping", func(c *gin.Context) {
 		c.String(200, "PONG")
@@ -64,6 +201,7 @@ func (s *Server) Start(p *Provider) {
 
 	s.router.GET("/get.php", s.getIptvM3u())
 	s.router.GET("/xmltv.php", s.getEpgXml())
+	s.router.GET("/channel/:channelId", s.streamChannel())
 
 	s.server = &http.Server{
 		Addr:    s.listenAddress,

@@ -10,7 +10,7 @@ import (
 
 type mockHandler struct {
 	playlistStartCalled bool
-	tracks              []track
+	tracks              []Track
 	playlistEndCalled   bool
 }
 
@@ -18,7 +18,7 @@ func (m *mockHandler) OnPlaylistStart() {
 	m.playlistStartCalled = true
 }
 
-func (m *mockHandler) OnTrack(t track) {
+func (m *mockHandler) OnTrack(t Track) {
 	m.tracks = append(m.tracks, t)
 }
 
@@ -42,7 +42,7 @@ http://example.com/channel1
 http://example.com/channel2`,
 			expected: mockHandler{
 				playlistStartCalled: true,
-				tracks: []track{
+				tracks: []Track{
 					{
 						Name:   "Channel 1",
 						Length: 0,

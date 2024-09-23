@@ -13,11 +13,11 @@ import (
 
 type m3uHandler interface {
 	OnPlaylistStart()
-	OnTrack(track track)
+	OnTrack(track Track)
 	OnPlaylistEnd()
 }
 
-type track struct {
+type Track struct {
 	Name       string
 	Length     float64
 	URI        *url.URL
@@ -32,7 +32,7 @@ var errMissingExtinf = errors.New("URL found without preceding EXTINF")
 func decodeM3u(r io.Reader, handler m3uHandler) error {
 	scanner := bufio.NewScanner(r)
 	lineNum := 0
-	var currentTrack *track
+	var currentTrack *Track
 
 	handler.OnPlaylistStart()
 
@@ -49,7 +49,7 @@ func decodeM3u(r io.Reader, handler m3uHandler) error {
 			if currentTrack != nil {
 				handler.OnTrack(*currentTrack)
 			}
-			currentTrack = &track{
+			currentTrack = &Track{
 				Raw:        line,
 				LineNumber: lineNum,
 			}

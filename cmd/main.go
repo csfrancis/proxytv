@@ -43,6 +43,7 @@ var (
 func (h *SafeUrlHook) Fire(entry *log.Entry) error {
 	if url, ok := entry.Data["url"]; ok {
 		entry.Data["url"] = safeUrlRegex.ReplaceAllStringFunc(url.(string), safeUrlReplaceFunc)
+
 	}
 	return nil
 }
