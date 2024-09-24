@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"regexp"
 	"strings"
@@ -77,6 +78,12 @@ func main() {
 	log.SetLevel(logLevel)
 
 	log.Infof("starting proxytv with config file: %s", *configPath)
+
+	if config.UseFFMPEG {
+		if _, err := exec.LookPath("ffmpeg"); err != nil {
+			log.Fatalf("ffmpeg is enabled but not found in PATH: %v", err)
+		}
+	}
 
 	provider, err := proxytv.NewProvider(config)
 	if err != nil {

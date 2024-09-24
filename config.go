@@ -3,7 +3,6 @@ package proxytv
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"time"
 
@@ -30,8 +29,9 @@ type Config struct {
 	ListenAddress string `yaml:"listenAddress,omitempty" default:":6078"`
 	ServerAddress string `yaml:"serverAddress"`
 
-	UseFFMPEG  bool `yaml:"ffmpeg,omitempty" default:"true"`
-	MaxStreams int  `yaml:"maxStreams,omitempty" default:"1"`
+	UseFFMPEG    bool
+	UseFFMPEGPtr *bool `yaml:"ffmpeg,omitempty" default:"true"`
+	MaxStreams   int   `yaml:"maxStreams,omitempty" default:"1"`
 
 	RefreshInterval    time.Duration
 	RefreshIntervalStr string `yaml:"refreshInterval,omitempty" default:"12h"`
@@ -57,6 +57,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	config.UseFFMPEG = *config.UseFFMPEGPtr
+
 	config.RefreshInterval, err = time.ParseDuration(config.RefreshIntervalStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid refreshInterval: %w", err)
@@ -80,12 +82,6 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if err := validateFileOrURL(config.EPGUrl); err != nil {
 		return nil, fmt.Errorf("invalid epgUrl: %w", err)
-	}
-
-	if config.UseFFMPEG {
-		if _, err := exec.LookPath("ffmpeg"); err != nil {
-			return nil, fmt.Errorf("ffmpeg is enabled but not found in PATH: %w", err)
-		}
 	}
 
 	if err := config.compileFilterRegexps(); err != nil {

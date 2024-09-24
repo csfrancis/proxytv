@@ -19,7 +19,7 @@ epgUrl: http://example.com/epg
 listenAddress: localhost:8080
 serverAddress: iptvserver:8080
 refreshInterval: '2h'
-ffmpeg: false
+ffmpeg: true
 maxStreams: 10
 filters:
   - filter: sports.*
