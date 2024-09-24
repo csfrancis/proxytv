@@ -15,7 +15,7 @@ dist:
 .PHONY: setup
 setup:
 	go mod download
-	go mod tiny
+	go mod tidy
 
 .PHONY: test
 test:
