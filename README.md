@@ -4,7 +4,7 @@
 
 ProxyTV is a lightweight proxy server for IPTV and EPG streams. It allows you to remux and serve IPTV channels and EPG data with ease.
 
-ProxyTV can use FFMPEG for remuxing streams. This is useful for bypassing some ISPs that may block certain IPTV streams. Simply run ProxyTV on a VPS and use the `serverAddress` option to point your client to the VPS address. Alternatively, you can run a VPN like Tailscale on both the client and VPS to simplify the process.
+ProxyTV can use FFmpeg for remuxing streams. This is useful for bypassing some ISPs that may block certain IPTV streams. Simply run ProxyTV on a VPS and use the `serverAddress` option to point your client to the VPS address. Alternatively, you can run a VPN like Tailscale on both the client and VPS to simplify the process.
 
 ProxyTV will filter channels based on the provided filters. The list of filtered channels will be included in the M3U and EPG XML files that are served. The ordering of the channels will be the same as the order of the filters. If no filters are provided, all channels will be included.
 
@@ -35,10 +35,23 @@ filters: # List of filters (optional)
 - `epgUrl`: The URL or file path to the EPG XML file.
 - `listenAddress`: The address the server will listen on. Default is ":6078".
 - `serverAddress`: The address used by the client to access the server. This field is required.
-- `refreshInterval`: The interval at which the provider should be refreshed. Default is "12h".
+- `refreshInterval`: The interval at which the provider M3U and EPG files should be refreshed. Default is "12h".
 - `ffmpeg`: Whether to use FFMPEG for remuxing streams. Default is `true`.
 - `maxStreams`: The maximum number of concurrent streams. Default is `1`.
 - `filters`: A list of filters to include channels based on regular expressions.
+
+## Usage
+
+Edit the `config.yaml` file to configure the server. Then run the server:
+
+```sh
+./proxytv -config /path/to/your/config.yaml
+```
+
+The server will run in the foreground and print logs to the console.
+
+Configure your IPTV client to point to the server address in the config file. For example, if the `serverAddress` is `proxy:6078`, then your IPTV client should point to `http://proxy:6078/iptv.m3u`. The URL for the EPG file will be `http://proxy:6078/epg.xml`.
+
 
 ## HTTP Endpoints
 
