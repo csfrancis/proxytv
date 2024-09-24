@@ -2,9 +2,9 @@
 
 ProxyTV is a lightweight proxy server for IPTV and EPG streams. It allows you to remux and serve IPTV channels and EPG data with ease.
 
-ProxyTV will filter channels based on the provided filters. The list of filtered channels will be included in the M3U and EPG XML files that are served. The ordering of the channels will be the same as the order of the filters.If no filters are provided, all channels will be included.
+ProxyTV can use FFMPEG for remuxing streams. This is useful for bypassing some ISPs that may block certain IPTV streams. Simply run ProxyTV on a VPS and use the `serverAddress` option to point your client to the VPS address. Alternatively, you can run a VPN like Tailscale on both the client and VPS to simplify the process.
 
-ProxyTV can use FFMPEG for remuxing streams. This is useful for bypassing some ISPs that may block certain IPTV streams. Simply run ProxyTV on a VPS and use the `baseAddress` option to point your client to the VPS address. Alternatively, you can run a VPN like Tailscale on both the client and VPS to simplify the process.
+ProxyTV will filter channels based on the provided filters. The list of filtered channels will be included in the M3U and EPG XML files that are served. The ordering of the channels will be the same as the order of the filters. If no filters are provided, all channels will be included.
 
 ## Configuration
 
@@ -15,9 +15,9 @@ logLevel: "info" # Log level (optional, default: "info")
 iptvUrl: "http://example.com/get.php?username=XXX&password=XXX&output=ts&type=m3u_plus" # URL to the IPTV M3U file (required)
 epgUrl: "http://example.com/xmltv.php?username=XXX&password=XXX" # URL to the EPG XML file (required)
 listenAddress: "0.0.0.0:6078" # Address to listen on (optional, default: "0.0.0.0:6078")
-baseAddress: "http://localhost:6078" # Base address for the server (required)
+serverAddress: "localhost:6078" # Base server address (required)
 refreshInterval: "12h" # Refresh interval (optional, default: "12h")
-ffmpeg: false # Use FFMPEG for remuxing (optional, default: false)
+ffmpeg: true # Use FFMPEG for remuxing (optional, default: true)
 maxStreams: 1 # Maximum number of concurrent streams (optional, default: 1)
 filters: # List of filters (optional)
   - filter: "USA \| NFL" # Regular expression filter
@@ -30,11 +30,11 @@ filters: # List of filters (optional)
 
 - `logLevel`: The logging level. Default is "info". Valid values are `debug`, `info`, `warn`, `error`, and `fatal`.
 - `iptvUrl`: The URL or file path to the IPTV M3U file. This field is required.
-- `epgUrl`: The URL or file path to the EPG XML file. This field is required.
+- `epgUrl`: The URL or file path to the EPG XML file.
 - `listenAddress`: The address the server will listen on. Default is "0.0.0.0:6078".
-- `baseAddress`: The base address for the server. This field is required.
+- `serverAddress`: The address used by the client to access the server. This field is required.
 - `refreshInterval`: The interval at which the provider should be refreshed. Default is "12h".
-- `ffmpeg`: Whether to use FFMPEG for remuxing streams. Default is `false`.
+- `ffmpeg`: Whether to use FFMPEG for remuxing streams. Default is `true`.
 - `maxStreams`: The maximum number of concurrent streams. Default is `1`.
 - `filters`: A list of filters to include channels based on regular expressions.
 
@@ -43,32 +43,37 @@ filters: # List of filters (optional)
 ProxyTV provides several HTTP endpoints for interacting with the server:
 
 - `GET /ping`: Returns "PONG" to check if the server is running.
-- `GET /get.php`: Downloads the IPTV M3U file.
-- `GET /xmltv.php`: Downloads the EPG XML file.
+- `GET /iptv.m3u`: Downloads the IPTV M3U file.
+- `GET /epg.xml`: Downloads the EPG XML file.
 - `GET /channel/:channelId`: Streams the specified channel by its ID.
 - `PUT /refresh`: Refreshes the provider data.
 
 ## Building the Project
 
-To build the ProxyTV project, you need to have Go installed on your machine. Follow the steps below to build the project:
+To build the ProxyTV project, you need to have Go (1.20 or later) installed on your machine. Follow the steps below to build the project:
 
 1. Clone the repository:
     ```sh
-    git clone https://github.com/yourusername/proxytv.git
+    git clone https://github.com/csfrancis/proxytv.git
     cd proxytv
     ```
 
-2. Build the project:
+2. Install dependencies:
     ```sh
-    go build -o proxytv
+    make setup
     ```
 
-3. Run the server:
+3. Build the project:
     ```sh
-    ./proxytv -config /path/to/your/config.yaml
+    make build
     ```
 
-Make sure to replace `/path/to/your/config.yaml` with the actual path to your configuration file.
+4. Run the server:
+    ```sh
+    ./dist/proxytv -config /path/to/your/config.yaml
+    ```
+
+Make sure to replace `/path/to/your/config.yaml` with the actual path to your configuration file. By default, proxytv will look for a config file in the current working directory.
 
 ## Logging
 

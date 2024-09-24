@@ -49,7 +49,7 @@ filters:
 		assert.Equal(t, "http://example.com/iptv", config.IPTVUrl)
 		assert.Equal(t, "http://example.com/epg", config.EPGUrl)
 		assert.Equal(t, "localhost:8080", config.ListenAddress)
-		assert.Equal(t, "iptvserver:8080", config.BaseAddress)
+		assert.Equal(t, "iptvserver:8080", config.ServerAddress)
 		assert.True(t, config.UseFFMPEG)
 		assert.Equal(t, 10, config.MaxStreams)
 		assert.Len(t, config.Filters, 2)

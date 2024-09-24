@@ -91,8 +91,8 @@ http://example.com/channel2
 				Filters: []*Filter{
 					{Type: "id", Value: ".*"},
 				},
-				UseFFMPEG:   true,
-				BaseAddress: "test.com:6078",
+				UseFFMPEG:     true,
+				ServerAddress: "test.com:6078",
 			},
 			m3uContent: `#EXTM3U
 #EXTINF:-1 tvg-id="id1" tvg-name="name1",Channel 1

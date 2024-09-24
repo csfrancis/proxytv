@@ -211,8 +211,8 @@ func (s *Server) Start(p *Provider) chan error {
 		c.String(200, "PONG")
 	})
 
-	s.router.GET("/get.php", s.getIptvM3u())
-	s.router.GET("/xmltv.php", s.getEpgXml())
+	s.router.GET("/iptv.m3u", s.getIptvM3u())
+	s.router.GET("/epg.xml", s.getEpgXml())
 	s.router.GET("/channel/:channelId", s.streamChannel())
 	s.router.PUT("/refresh", s.refresh())
 

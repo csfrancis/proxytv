@@ -173,7 +173,7 @@ func NewProvider(config *Config) (*Provider, error) {
 	}
 
 	if config.UseFFMPEG {
-		provider.baseAddress = config.BaseAddress
+		provider.baseAddress = config.ServerAddress
 	}
 
 	return provider, nil

@@ -3,6 +3,7 @@ package proxytv
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"time"
 
@@ -27,9 +28,9 @@ type Config struct {
 	EPGUrl   string `yaml:"epgUrl"`
 
 	ListenAddress string `yaml:"listenAddress,omitempty" default:"0.0.0.0:6078"`
-	BaseAddress   string `yaml:"baseAddress"`
+	ServerAddress string `yaml:"serverAddress"`
 
-	UseFFMPEG  bool `yaml:"ffmpeg,omitempty" default:"false"`
+	UseFFMPEG  bool `yaml:"ffmpeg,omitempty" default:"true"`
 	MaxStreams int  `yaml:"maxStreams,omitempty" default:"1"`
 
 	RefreshInterval    time.Duration
@@ -67,12 +68,24 @@ func LoadConfig(path string) (*Config, error) {
 	if config.EPGUrl == "" {
 		return nil, fmt.Errorf("epgUrl is required")
 	}
+	if config.ServerAddress == "" {
+		return nil, fmt.Errorf("serverAddress is required")
+	}
+
+	re := regexp.MustCompile(`^https?://`)
+	config.ServerAddress = re.ReplaceAllString(config.ServerAddress, "")
 
 	if err := validateFileOrURL(config.IPTVUrl); err != nil {
 		return nil, fmt.Errorf("invalid iptvUrl: %w", err)
 	}
 	if err := validateFileOrURL(config.EPGUrl); err != nil {
 		return nil, fmt.Errorf("invalid epgUrl: %w", err)
+	}
+
+	if config.UseFFMPEG {
+		if _, err := exec.LookPath("ffmpeg"); err != nil {
+			return nil, fmt.Errorf("ffmpeg is enabled but not found in PATH: %w", err)
+		}
 	}
 
 	if err := config.compileFilterRegexps(); err != nil {
