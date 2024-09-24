@@ -17,7 +17,7 @@ logLevel: info
 iptvUrl: http://example.com/iptv
 epgUrl: http://example.com/epg
 listenAddress: localhost:8080
-baseAddress: iptvserver:8080
+serverAddress: iptvserver:8080
 refreshInterval: '2h'
 ffmpeg: true
 maxStreams: 10
@@ -68,6 +68,7 @@ filters:
 logLevel: info
 iptvUrl: http://example.com/iptv
 epgUrl: http://example.com/iptv
+serverAddress: iptvserver:8080
 filters:
   - filter: sports.*
     type: include
@@ -99,6 +100,7 @@ filters:
 		content := []byte(`
 iptvUrl: invalid://example.com/iptv
 epgUrl: not_a_valid_url
+serverAddress: iptvserver:8080
 `)
 
 		tmpfile, err := os.CreateTemp("", "config*.yaml")
@@ -123,6 +125,7 @@ epgUrl: not_a_valid_url
 		content = []byte(`
 iptvUrl: http://example.com/iptv
 epgUrl: not_a_valid_url
+serverAddress: iptvserver:8080
 `)
 
 		if err := os.WriteFile(tmpfile.Name(), content, 0644); err != nil {
@@ -155,6 +158,7 @@ epgUrl: not_a_valid_url
 		content := []byte(fmt.Sprintf(`
 iptvUrl: %s
 epgUrl: %s
+serverAddress: iptvserver:8080
 `, iptvFile.Name(), epgFile.Name()))
 
 		// Create temporary config file
