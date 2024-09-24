@@ -1,5 +1,7 @@
 # ProxyTV
 
+[![CI](https://github.com/csfrancis/proxytv/actions/workflows/ci.yml/badge.svg)](https://github.com/csfrancis/proxytv/actions/workflows/ci.yml)
+
 ProxyTV is a lightweight proxy server for IPTV and EPG streams. It allows you to remux and serve IPTV channels and EPG data with ease.
 
 ProxyTV can use FFMPEG for remuxing streams. This is useful for bypassing some ISPs that may block certain IPTV streams. Simply run ProxyTV on a VPS and use the `serverAddress` option to point your client to the VPS address. Alternatively, you can run a VPN like Tailscale on both the client and VPS to simplify the process.
@@ -50,7 +52,7 @@ ProxyTV provides several HTTP endpoints for interacting with the server:
 
 ## Building the Project
 
-To build the ProxyTV project, you need to have Go (1.20 or later) installed on your machine. Follow the steps below to build the project:
+To build the ProxyTV project, you need to have Go (1.22 or later) installed on your machine. Follow the steps below to build the project:
 
 1. Clone the repository:
     ```sh
