@@ -27,7 +27,7 @@ type Config struct {
 	IPTVUrl  string `yaml:"iptvUrl"`
 	EPGUrl   string `yaml:"epgUrl"`
 
-	ListenAddress string `yaml:"listenAddress,omitempty" default:"0.0.0.0:6078"`
+	ListenAddress string `yaml:"listenAddress,omitempty" default:":6078"`
 	ServerAddress string `yaml:"serverAddress"`
 
 	UseFFMPEG  bool `yaml:"ffmpeg,omitempty" default:"true"`

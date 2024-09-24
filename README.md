@@ -14,7 +14,7 @@ To configure ProxyTV, you need to create a YAML configuration file. Below is an 
 logLevel: "info" # Log level (optional, default: "info")
 iptvUrl: "http://example.com/get.php?username=XXX&password=XXX&output=ts&type=m3u_plus" # URL to the IPTV M3U file (required)
 epgUrl: "http://example.com/xmltv.php?username=XXX&password=XXX" # URL to the EPG XML file (required)
-listenAddress: "0.0.0.0:6078" # Address to listen on (optional, default: "0.0.0.0:6078")
+listenAddress: ":6078" # Address to listen on (optional, default: ":6078")
 serverAddress: "localhost:6078" # Base server address (required)
 refreshInterval: "12h" # Refresh interval (optional, default: "12h")
 ffmpeg: true # Use FFMPEG for remuxing (optional, default: true)
@@ -31,7 +31,7 @@ filters: # List of filters (optional)
 - `logLevel`: The logging level. Default is "info". Valid values are `debug`, `info`, `warn`, `error`, and `fatal`.
 - `iptvUrl`: The URL or file path to the IPTV M3U file. This field is required.
 - `epgUrl`: The URL or file path to the EPG XML file.
-- `listenAddress`: The address the server will listen on. Default is "0.0.0.0:6078".
+- `listenAddress`: The address the server will listen on. Default is ":6078".
 - `serverAddress`: The address used by the client to access the server. This field is required.
 - `refreshInterval`: The interval at which the provider should be refreshed. Default is "12h".
 - `ffmpeg`: Whether to use FFMPEG for remuxing streams. Default is `true`.
