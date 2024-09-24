@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -72,8 +71,6 @@ func (s *Server) getEpgXml() gin.HandlerFunc {
 }
 
 func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
-	s.streamCount++
-
 	if s.streamCount > s.maxStreams {
 		log.WithFields(log.Fields{
 			"channelId":   channelId,
@@ -87,8 +84,11 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
 	logger := log.WithFields(log.Fields{
 		"url":       track.URI.String(),
 		"channelId": channelId,
+		"clientIP":  c.RemoteIP(),
 	})
-	logger.WithField("streamCount", s.streamCount).Info("remuxing stream")
+	logger.Info("remuxing stream")
+
+	start := time.Now()
 
 	run := exec.Command("ffmpeg", "-i", track.URI.String(), "-c:v", "copy", "-f", "mpegts", "pipe:1")
 	logger.WithField("cmd", strings.Join(run.Args, " ")).Debug("executing ffmpeg")
@@ -109,6 +109,9 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
 	}
 	defer run.Wait()
 
+	s.streamCount++
+	defer func() { s.streamCount-- }()
+
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		scanner.Split(split)
@@ -120,15 +123,9 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
 	continueStream := true
 	c.Header("Content-Type", `video/mpeg; codecs="avc1.4D401E"`)
 
-	var decrementStreamCount sync.Once
-
 	c.Stream(func(w io.Writer) bool {
 		defer func() {
-			decrementStreamCount.Do(func() {
-				s.streamCount--
-			})
-
-			logger.WithField("streamCount", s.streamCount).Info("stopped streaming")
+			logger.WithField("duration", time.Since(start)).Info("stopped streaming")
 			if killErr := run.Process.Kill(); killErr != nil {
 				logger.WithError(killErr).Error("error killing ffmpeg")
 			}
