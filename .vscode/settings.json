@@ -4,5 +4,6 @@
       "-tags=debug",
     ],
 
-  }
+  },
+  "makefile.configureOnOpen": false
 }
