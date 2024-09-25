@@ -8,7 +8,7 @@ build: clean
 
 .PHONY: linux
 linux: clean dist
-	GOOS=linux GOARCH=arm64 go build -tags release -o dist/proxytv -ldflags "-X 'main.gitCommit=$(GIT_COMMIT)'"./cmd/main.go
+	GOOS=linux GOARCH=arm64 $(MAKE) build
 
 .PHONY: dist
 dist:
