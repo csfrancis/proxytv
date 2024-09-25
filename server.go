@@ -71,10 +71,12 @@ func (s *Server) getEpgXML() gin.HandlerFunc {
 }
 
 func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
+	var err error
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	if err := s.streamsSem.Acquire(ctx, 1); err != nil {
+	if err = s.streamsSem.Acquire(ctx, 1); err != nil {
 		log.WithFields(log.Fields{
 			"channelId": channelID,
 		}).Warn("max streams reached")
@@ -119,21 +121,24 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 		}
 	}()
 
+	bytesWritten := int64(0)
 	continueStream := true
 	c.Header("Content-Type", `video/mpeg; codecs="avc1.4D401E"`)
 
 	c.Stream(func(w io.Writer) bool {
 		defer func() {
-			logger.WithField("duration", time.Since(start)).Info("stopped streaming")
+			logger.WithFields(log.Fields{
+				"duration": time.Since(start),
+				"bytes":    bytesWritten,
+			}).Info("stopped streaming")
 			if killErr := run.Process.Kill(); killErr != nil {
 				logger.WithError(killErr).Error("error killing ffmpeg")
 			}
-
 			continueStream = false
 		}()
 
-		if _, copyErr := io.Copy(w, ffmpegout); copyErr != nil && !errors.Is(copyErr, syscall.EPIPE) {
-			logger.WithError(copyErr).Error("error when copying data")
+		if bytesWritten, err = io.Copy(w, ffmpegout); err != nil && !errors.Is(err, syscall.EPIPE) {
+			logger.WithError(err).Error("error when copying data")
 			continueStream = false
 			return false
 		}
