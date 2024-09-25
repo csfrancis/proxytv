@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
 )
 
 type Server struct {
@@ -23,8 +24,7 @@ type Server struct {
 	server        *http.Server
 	provider      *Provider
 	useFfmpeg     bool
-	maxStreams    int
-	streamCount   int
+	streamsSem    *semaphore.Weighted
 }
 
 func logrusLogFormatter(param gin.LogFormatterParams) string {
@@ -46,7 +46,7 @@ func NewServer(config *Config, provider *Provider) (*Server, error) {
 		router:        gin.New(),
 		provider:      provider,
 		useFfmpeg:     config.UseFFMPEG,
-		maxStreams:    config.MaxStreams,
+		streamsSem:    semaphore.NewWeighted(int64(config.MaxStreams)),
 	}
 
 	server.router.Use(gin.LoggerWithFormatter(logrusLogFormatter))
@@ -71,15 +71,17 @@ func (s *Server) getEpgXml() gin.HandlerFunc {
 }
 
 func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
-	if s.streamCount > s.maxStreams {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := s.streamsSem.Acquire(ctx, 1); err != nil {
 		log.WithFields(log.Fields{
-			"channelId":   channelId,
-			"streamCount": s.streamCount,
-			"maxStreams":  s.maxStreams,
+			"channelId": channelId,
 		}).Warn("max streams reached")
 		c.String(429, "Too many requests")
 		return
 	}
+	defer s.streamsSem.Release(1)
 
 	logger := log.WithFields(log.Fields{
 		"url":       track.URI.String(),
@@ -108,9 +110,6 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
 		return
 	}
 	defer run.Wait()
-
-	s.streamCount++
-	defer func() { s.streamCount-- }()
 
 	go func() {
 		scanner := bufio.NewScanner(stderr)
