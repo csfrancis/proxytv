@@ -40,6 +40,8 @@ var (
 
 		return ret
 	}
+
+	gitCommit string
 )
 
 func (h *SafeUrlHook) Fire(entry *log.Entry) error {
@@ -77,7 +79,11 @@ func main() {
 	}
 	log.SetLevel(logLevel)
 
-	log.Infof("starting proxytv with config file: %s", *configPath)
+	log.WithFields(
+		log.Fields{
+			"gitCommit": gitCommit,
+			"config":    *configPath,
+		}).Info("starting proxytv")
 
 	if config.UseFFMPEG {
 		if _, err := exec.LookPath("ffmpeg"); err != nil {
