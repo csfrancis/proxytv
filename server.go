@@ -64,19 +64,19 @@ func (s *Server) getIptvM3u() gin.HandlerFunc {
 	}
 }
 
-func (s *Server) getEpgXml() gin.HandlerFunc {
+func (s *Server) getEpgXML() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Data(200, "application/xml", []byte(s.provider.GetEpgXml()))
+		c.Data(200, "application/xml", []byte(s.provider.GetEpgXML()))
 	}
 }
 
-func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
+func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	if err := s.streamsSem.Acquire(ctx, 1); err != nil {
 		log.WithFields(log.Fields{
-			"channelId": channelId,
+			"channelId": channelID,
 		}).Warn("max streams reached")
 		c.String(429, "Too many requests")
 		return
@@ -85,7 +85,7 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelId int) {
 
 	logger := log.WithFields(log.Fields{
 		"url":       track.URI.String(),
-		"channelId": channelId,
+		"channelId": channelID,
 		"clientIP":  c.RemoteIP(),
 	})
 	logger.Info("remuxing stream")
@@ -178,8 +178,8 @@ func (s *Server) refresh() gin.HandlerFunc {
 
 func (s *Server) streamChannel() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		channelIdParam := c.Param("channelId")
-		channelId, err := strconv.Atoi(channelIdParam)
+		channelIDParam := c.Param("channelId")
+		channelID, err := strconv.Atoi(channelIDParam)
 		if err != nil {
 			log.WithError(err).Warn("invalid channelId")
 			c.String(400, "Invalid channel id")
@@ -191,14 +191,14 @@ func (s *Server) streamChannel() gin.HandlerFunc {
 			return
 		}
 
-		track := s.provider.GetTrack(channelId)
+		track := s.provider.GetTrack(channelID)
 		if track.URI == nil {
-			log.WithField("channelId", channelId).Warn("channel not found")
+			log.WithField("channelId", channelID).Warn("channel not found")
 			c.String(404, "Channel not found")
 			return
 		}
 
-		s.remuxStream(c, track, channelId)
+		s.remuxStream(c, track, channelID)
 	}
 }
 
@@ -208,7 +208,7 @@ func (s *Server) Start(p *Provider) chan error {
 	})
 
 	s.router.GET("/iptv.m3u", s.getIptvM3u())
-	s.router.GET("/epg.xml", s.getEpgXml())
+	s.router.GET("/epg.xml", s.getEpgXML())
 	s.router.GET("/channel/:channelId", s.streamChannel())
 	s.router.PUT("/refresh", s.refresh())
 

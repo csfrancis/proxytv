@@ -59,7 +59,7 @@ func loadM3u(r io.Reader, handler m3uHandler) error {
 				return err
 			}
 
-		case isUrl(line):
+		case isURL(line):
 			if currentTrack == nil {
 				return errMissingExtinf
 			}
@@ -83,7 +83,7 @@ func loadM3u(r io.Reader, handler m3uHandler) error {
 	return nil
 }
 
-func isUrl(str string) bool {
+func isURL(str string) bool {
 	u, err := url.Parse(str)
 	return err == nil && u.Scheme != "" && u.Host != ""
 }

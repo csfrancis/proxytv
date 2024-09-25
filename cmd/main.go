@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,15 +17,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type SafeUrlHook struct{}
-
-func (h *SafeUrlHook) Levels() []log.Level {
-	return log.AllLevels
-}
-
 var (
-	safeUrlRegex       = regexp.MustCompile(`(?m)(username|password|token)=[\w=]+(&?)`)
-	safeUrlReplaceFunc = func(input string) string {
+	safeURLRegex       = regexp.MustCompile(`(?m)(username|password|token)=[\w=]+(&?)`)
+	safeURLReplaceFunc = func(input string) string {
 		ret := input
 		if strings.HasPrefix(input, "username=") {
 			ret = "username=REDACTED"
@@ -44,15 +39,38 @@ var (
 	gitCommit string
 )
 
-func (h *SafeUrlHook) Fire(entry *log.Entry) error {
-	if url, ok := entry.Data["url"]; ok {
-		entry.Data["url"] = safeUrlRegex.ReplaceAllStringFunc(url.(string), safeUrlReplaceFunc)
+type safeURLHook struct{}
 
+func (h *safeURLHook) Levels() []log.Level {
+	return log.AllLevels
+}
+
+func (h *safeURLHook) Fire(entry *log.Entry) error {
+	if urlStr, ok := entry.Data["url"]; ok {
+		urlStr = safeURLRegex.ReplaceAllStringFunc(urlStr.(string), safeURLReplaceFunc)
+		if url, err := url.Parse(urlStr.(string)); err == nil {
+			pathParts := strings.Split(url.Path, "/")[1:]
+			for i := 0; len(pathParts) > 1 && i < len(pathParts)-1; i++ {
+				pathParts[i] = "XXXX"
+			}
+			url.Path = "/" + strings.Join(pathParts, "/")
+			urlStr = url.String()
+		}
+		entry.Data["url"] = urlStr
 	}
 	return nil
 }
 
+func initLogging() {
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true, // Set to true to include full timestamp
+	})
+	log.AddHook(&safeURLHook{})
+}
+
 func init() {
+	initLogging()
+
 	proxytv.SetGinMode()
 }
 
@@ -60,11 +78,6 @@ func main() {
 	// Define command-line flag for config file
 	configPath := flag.String("config", "config.yaml", "path to configuration file")
 	flag.Parse()
-
-	log.SetFormatter(&log.TextFormatter{
-		FullTimestamp: true, // Set to true to include full timestamp
-	})
-	log.AddHook(&SafeUrlHook{})
 
 	// Use the provided config file path or the default
 	config, err := proxytv.LoadConfig(*configPath)

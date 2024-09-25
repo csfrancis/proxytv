@@ -33,7 +33,7 @@ func newPlaylistLoader(baseAddress string, filters []*Filter) *playlistLoader {
 	}
 }
 
-func (pl *playlistLoader) findIndexWithId(track *Track) int {
+func (pl *playlistLoader) findIndexWithID(track *Track) int {
 	id := track.Tags["tvg-id"]
 	if len(id) == 0 {
 		return -1
@@ -79,7 +79,7 @@ func (pl *playlistLoader) OnTrack(track *Track) {
 			}
 
 			if existingPriority, exists := pl.priorities[name]; !exists || i < existingPriority {
-				idx := pl.findIndexWithId(track)
+				idx := pl.findIndexWithID(track)
 				if idx != -1 {
 					if strings.Contains(track.Name, "HD") {
 						delete(pl.priorities, pl.tracks[idx].Name)
@@ -117,12 +117,12 @@ func (pl *playlistLoader) OnPlaylistEnd() {
 		return priorityI < priorityJ
 	})
 
-	rewriteUrl := len(pl.baseAddress) > 0
+	rewriteURL := len(pl.baseAddress) > 0
 
 	for i := range len(pl.tracks) {
 		track := pl.tracks[i]
 		uri := track.URI.String()
-		if rewriteUrl {
+		if rewriteURL {
 			uri = fmt.Sprintf("http://%s/channel/%d", pl.baseAddress, i)
 		}
 		pl.m3u.WriteString(fmt.Sprintf("%s\n%s\n", track.Raw, uri))
@@ -133,7 +133,7 @@ func loadReader(uri string) io.ReadCloser {
 	var err error
 	var reader io.ReadCloser
 	logger := log.WithField("uri", uri)
-	if isUrl(uri) {
+	if isURL(uri) {
 		resp, err := http.Get(uri)
 		if err != nil {
 			logger.WithError(err).Panic("unable to load uri")
@@ -155,8 +155,8 @@ func loadReader(uri string) io.ReadCloser {
 }
 
 type Provider struct {
-	iptvUrl     string
-	epgUrl      string
+	iptvURL     string
+	epgURL      string
 	baseAddress string
 	filters     []*Filter
 
@@ -167,8 +167,8 @@ type Provider struct {
 
 func NewProvider(config *Config) (*Provider, error) {
 	provider := &Provider{
-		iptvUrl: config.IPTVUrl,
-		epgUrl:  config.EPGUrl,
+		iptvURL: config.IPTVUrl,
+		epgURL:  config.EPGUrl,
 		filters: config.Filters,
 	}
 
@@ -179,7 +179,7 @@ func NewProvider(config *Config) (*Provider, error) {
 	return provider, nil
 }
 
-func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
+func (p *Provider) loadXMLTv(reader io.Reader) (*xmltv.TV, error) {
 	start := time.Now()
 
 	channels := make(map[string]bool)
@@ -262,10 +262,10 @@ func (p *Provider) loadXmlTv(reader io.Reader) (*xmltv.TV, error) {
 
 func (p *Provider) Refresh() error {
 	var err error
-	log.WithField("url", p.iptvUrl).Info("loading IPTV m3u")
+	log.WithField("url", p.iptvURL).Info("loading IPTV m3u")
 
 	start := time.Now()
-	iptvReader := loadReader(p.iptvUrl)
+	iptvReader := loadReader(p.iptvURL)
 	defer iptvReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
 
@@ -278,14 +278,14 @@ func (p *Provider) Refresh() error {
 
 	log.WithField("channelCount", len(p.playlist.tracks)).Info("parsed IPTV m3u")
 
-	log.WithField("url", p.epgUrl).Info("loading EPG")
+	log.WithField("url", p.epgURL).Info("loading EPG")
 
 	start = time.Now()
-	epgReader := loadReader(p.epgUrl)
+	epgReader := loadReader(p.epgURL)
 	defer epgReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded EPG")
 
-	p.epg, err = p.loadXmlTv(epgReader)
+	p.epg, err = p.loadXMLTv(epgReader)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (p *Provider) GetM3u() string {
 	return p.playlist.m3u.String()
 }
 
-func (p *Provider) GetEpgXml() string {
+func (p *Provider) GetEpgXML() string {
 	return string(p.epgData)
 }
 

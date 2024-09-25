@@ -1,9 +1,13 @@
 {
   "gopls": {
-    "build.buildFlags": [
-      "-tags=debug",
-    ],
-
+    "build.buildFlags": ["-tags", "debug"]
   },
-  "makefile.configureOnOpen": false
+  "makefile.configureOnOpen": false,
+  "go.buildTags": "debug",
+  "go.testTags": null,
+  "go.lintTool": "staticcheck",
+  "go.lintFlags": [
+    "-checks=all,-ST1000",
+    "-tags=debug",
+  ],
 }
