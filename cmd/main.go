@@ -117,7 +117,7 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	server, err := proxytv.NewServer(config, provider)
+	server, err := proxytv.NewServer(config, provider, gitCommit)
 	if err != nil {
 		log.Fatalf("failed to create server: %v", err)
 	}

@@ -160,9 +160,10 @@ type Provider struct {
 	baseAddress string
 	filters     []*Filter
 
-	playlist *playlistLoader
-	epg      *xmltv.TV
-	epgData  []byte
+	playlist    *playlistLoader
+	epg         *xmltv.TV
+	epgData     []byte
+	lastRefresh time.Time
 }
 
 func NewProvider(config *Config) (*Provider, error) {
@@ -298,6 +299,8 @@ func (p *Provider) Refresh() error {
 	xmlHeader := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE tv SYSTEM \"xmltv.dtd\">")
 	p.epgData = append(xmlHeader, xmlData...)
 
+	p.lastRefresh = time.Now()
+
 	return nil
 }
 
@@ -316,4 +319,8 @@ func (p *Provider) GetTrack(idx int) *Track {
 		return &trackNotFound
 	}
 	return &p.playlist.tracks[idx]
+}
+
+func (p *Provider) GetLastRefresh() time.Time {
+	return p.lastRefresh
 }

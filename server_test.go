@@ -22,7 +22,7 @@ func TestServerStartStop(t *testing.T) {
 	}
 
 	// Create a new server
-	server, err := NewServer(config, provider)
+	server, err := NewServer(config, provider, "test")
 	require.NoError(t, err)
 
 	// Start the server

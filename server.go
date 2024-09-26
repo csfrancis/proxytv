@@ -13,10 +13,16 @@ import (
 	"syscall"
 	"time"
 
+	"runtime"
+
+	"sync/atomic"
+
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
+
+var startTime = time.Now()
 
 type Server struct {
 	listenAddress string
@@ -25,6 +31,10 @@ type Server struct {
 	provider      *Provider
 	useFfmpeg     bool
 	streamsSem    *semaphore.Weighted
+	maxStreams    int64
+	activeStreams int64
+	totalStreams  int64
+	version       string
 }
 
 func logrusLogFormatter(param gin.LogFormatterParams) string {
@@ -40,13 +50,17 @@ func logrusLogFormatter(param gin.LogFormatterParams) string {
 	return ""
 }
 
-func NewServer(config *Config, provider *Provider) (*Server, error) {
+func NewServer(config *Config, provider *Provider, version string) (*Server, error) {
 	server := &Server{
 		listenAddress: config.ListenAddress,
 		router:        gin.New(),
 		provider:      provider,
 		useFfmpeg:     config.UseFFMPEG,
 		streamsSem:    semaphore.NewWeighted(int64(config.MaxStreams)),
+		maxStreams:    int64(config.MaxStreams),
+		activeStreams: 0,
+		totalStreams:  0,
+		version:       version,
 	}
 
 	server.router.Use(gin.LoggerWithFormatter(logrusLogFormatter))
@@ -71,19 +85,21 @@ func (s *Server) getEpgXML() gin.HandlerFunc {
 }
 
 func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
-	var err error
-
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	if err = s.streamsSem.Acquire(ctx, 1); err != nil {
+	if err := s.streamsSem.Acquire(ctx, 1); err != nil {
 		log.WithFields(log.Fields{
 			"channelId": channelID,
 		}).Warn("max streams reached")
 		c.String(429, "Too many requests")
 		return
 	}
-	defer s.streamsSem.Release(1)
+	atomic.AddInt64(&s.activeStreams, 1)
+	defer func() {
+		s.streamsSem.Release(1)
+		atomic.AddInt64(&s.activeStreams, -1)
+	}()
 
 	logger := log.WithFields(log.Fields{
 		"url":       track.URI.String(),
@@ -120,6 +136,8 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 			log.Debugln(scanner.Text())
 		}
 	}()
+
+	atomic.AddInt64(&s.totalStreams, 1)
 
 	bytesWritten := int64(0)
 	continueStream := true
@@ -207,6 +225,42 @@ func (s *Server) streamChannel() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) debug() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+
+		numGoroutines := runtime.NumGoroutine()
+		numCPU := runtime.NumCPU()
+		activeStreams := atomic.LoadInt64(&s.activeStreams)
+		totalStreams := atomic.LoadInt64(&s.totalStreams)
+
+		metrics := gin.H{
+			"status":  "ok",
+			"version": s.version,
+			"system": gin.H{
+				"memory": gin.H{
+					"alloc":      m.Alloc,
+					"totalAlloc": m.TotalAlloc,
+					"sys":        m.Sys,
+					"numGC":      m.NumGC,
+				},
+				"goroutines": numGoroutines,
+				"cpus":       numCPU,
+			},
+			"uptime": time.Since(startTime).String(),
+			"streams": gin.H{
+				"active":      activeStreams,
+				"max":         s.maxStreams,
+				"total":       totalStreams,
+				"lastRefresh": s.provider.GetLastRefresh().Format(time.RFC3339),
+			},
+		}
+
+		c.JSON(200, metrics)
+	}
+}
+
 func (s *Server) Start(p *Provider) chan error {
 	s.router.GET("/ping", func(c *gin.Context) {
 		c.String(200, "PONG")
@@ -216,6 +270,7 @@ func (s *Server) Start(p *Provider) chan error {
 	s.router.GET("/epg.xml", s.getEpgXML())
 	s.router.GET("/channel/:channelId", s.streamChannel())
 	s.router.PUT("/refresh", s.refresh())
+	s.router.GET("/debug", s.debug())
 
 	s.server = &http.Server{
 		Addr:    s.listenAddress,
