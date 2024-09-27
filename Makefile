@@ -23,8 +23,11 @@ dist:
 .PHONY: setup
 setup:
 	go mod download
-	go mod tidy
 	go install github.com/go-bindata/go-bindata/v3/...@v3.1.3
+
+.PHONY: tidy
+tidy:
+	go mod tidy
 
 .PHONY: test
 test:
