@@ -30,7 +30,7 @@ tidy:
 	go mod tidy
 
 .PHONY: test
-test:
+test: build-css copy-web-assets
 	go test -tags debug -v ./...
 
 .PHONY: clean
