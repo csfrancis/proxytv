@@ -1,0 +1,18 @@
+{{ define "content" }}
+<h1 class="text-3xl font-bold mb-4 dark:text-dark-text">ProxyTV Dashboard</h1>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-white dark:bg-gray-800 p-4 rounded shadow">
+        <h2 class="text-xl font-semibold mb-2 dark:text-dark-text">Server Status</h2>
+        <div hx-get="/stream-counts" hx-trigger="every 5s">
+            {{ template "stream_counts.html" . }}
+        </div>
+    </div>
+    <div class="bg-white dark:bg-gray-800 p-4 rounded shadow">
+        <h2 class="text-xl font-semibold mb-2 dark:text-dark-text">Actions</h2>
+        <button hx-put="/refresh" hx-target="#refresh-status" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition duration-300">
+            Refresh Provider
+        </button>
+        <p id="refresh-status" class="mt-2 dark:text-dark-text"></p>
+    </div>
+</div>
+{{ end }}

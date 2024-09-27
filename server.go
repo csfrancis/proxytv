@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os/exec"
+	"path"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,6 +19,10 @@ import (
 
 	"sync/atomic"
 
+	"html/template"
+
+	"github.com/csfrancis/proxytv/data/static"
+	"github.com/csfrancis/proxytv/data/templates"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
@@ -40,7 +46,6 @@ type Server struct {
 func logrusLogFormatter(param gin.LogFormatterParams) string {
 	log.WithFields(log.Fields{
 		"clientIP":   param.ClientIP,
-		"timeStamp":  param.TimeStamp.Format(time.RFC1123),
 		"method":     param.Method,
 		"path":       param.Path,
 		"statusCode": param.StatusCode,
@@ -48,6 +53,27 @@ func logrusLogFormatter(param gin.LogFormatterParams) string {
 	}).Debug("handled http request")
 
 	return ""
+}
+
+type fsAdapter struct {
+	fs    http.FileSystem
+	names []string
+}
+
+func (f *fsAdapter) Open(name string) (fs.File, error) {
+	return f.fs.Open(name)
+}
+
+func (f *fsAdapter) Glob(pattern string) ([]string, error) {
+	matches := []string{}
+	for _, name := range f.names {
+		if matched, err := path.Match(pattern, name); err != nil {
+			return nil, err
+		} else if matched {
+			matches = append(matches, name)
+		}
+	}
+	return matches, nil
 }
 
 func NewServer(config *Config, provider *Provider, version string) (*Server, error) {
@@ -65,6 +91,12 @@ func NewServer(config *Config, provider *Provider, version string) (*Server, err
 
 	server.router.Use(gin.LoggerWithFormatter(logrusLogFormatter))
 	server.router.Use(gin.Recovery())
+
+	// Load HTML templates
+	//templ := template.Must(template.ParseGlob("web/templates/*.html"))
+	fsa := &fsAdapter{fs: templates.AssetFile(), names: templates.AssetNames()}
+	templ := template.Must(template.ParseFS(fsa, "*.html"))
+	server.router.SetHTMLTemplate(templ)
 
 	return server, nil
 }
@@ -195,7 +227,7 @@ func (s *Server) refresh() gin.HandlerFunc {
 			c.String(500, "Error refreshing provider")
 			return
 		}
-		c.String(200, "OK")
+		c.String(200, "Provider refreshed successfully")
 	}
 }
 
@@ -261,16 +293,38 @@ func (s *Server) debug() gin.HandlerFunc {
 	}
 }
 
-func (s *Server) Start(p *Provider) chan error {
+func (s *Server) getStreamCountData() gin.H {
+	return gin.H{
+		"ActiveStreams": atomic.LoadInt64(&s.activeStreams),
+		"TotalStreams":  atomic.LoadInt64(&s.totalStreams),
+	}
+}
+
+func (s *Server) homePage() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.HTML(http.StatusOK, "base.html", s.getStreamCountData())
+	}
+}
+
+func (s *Server) getStreamCounts() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.HTML(http.StatusOK, "stream_counts.html", s.getStreamCountData())
+	}
+}
+
+func (s *Server) Start(provider *Provider) chan error {
 	s.router.GET("/ping", func(c *gin.Context) {
 		c.String(200, "PONG")
 	})
 
+	s.router.GET("/", s.homePage())
 	s.router.GET("/iptv.m3u", s.getIptvM3u())
 	s.router.GET("/epg.xml", s.getEpgXML())
 	s.router.GET("/channel/:channelId", s.streamChannel())
 	s.router.PUT("/refresh", s.refresh())
 	s.router.GET("/debug", s.debug())
+	s.router.GET("/stream-counts", s.getStreamCounts())
+	s.router.StaticFS("/static", static.AssetFile())
 
 	s.server = &http.Server{
 		Addr:    s.listenAddress,

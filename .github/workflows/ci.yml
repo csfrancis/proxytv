@@ -16,6 +16,12 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
+    - name: Install tailwindcss CLI
+      run: |
+        curl -L -o tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.13/tailwindcss-linux-x64
+        chmod +x tailwindcss
+        sudo mv tailwindcss /usr/local/bin/
+
     - name: Install dependencies
       run: make setup
 
