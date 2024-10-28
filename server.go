@@ -93,7 +93,6 @@ func NewServer(config *Config, provider *Provider, version string) (*Server, err
 	server.router.Use(gin.Recovery())
 
 	// Load HTML templates
-	//templ := template.Must(template.ParseGlob("web/templates/*.html"))
 	fsa := &fsAdapter{fs: templates.AssetFile(), names: templates.AssetNames()}
 	templ := template.Must(template.ParseFS(fsa, "*.html"))
 	server.router.SetHTMLTemplate(templ)
@@ -187,8 +186,15 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 			continueStream = false
 		}()
 
-		if bytesWritten, err = io.Copy(w, ffmpegout); err != nil && !errors.Is(err, syscall.EPIPE) {
-			logger.WithError(err).Error("error when copying data")
+		timeoutReader := NewTimeoutReader(ffmpegout, 30*time.Second)
+		timeoutWriter := NewTimeoutWriter(w, 30*time.Second)
+
+		if bytesWritten, err = io.Copy(timeoutWriter, timeoutReader); err != nil {
+			if err == ErrTimeout {
+				logger.Warn("timeout occurred during stream copy")
+			} else if !errors.Is(err, syscall.EPIPE) {
+				logger.WithError(err).Error("error when copying data")
+			}
 			continueStream = false
 			return false
 		}
@@ -360,4 +366,64 @@ func (s *Server) Stop() error {
 	log.Info("http server stopped")
 
 	return nil
+}
+
+var ErrTimeout = errors.New("timeout")
+
+type TimeoutReader struct {
+	r       io.Reader
+	timeout time.Duration
+}
+
+func NewTimeoutReader(r io.Reader, timeout time.Duration) *TimeoutReader {
+	return &TimeoutReader{r: r, timeout: timeout}
+}
+
+func (tr *TimeoutReader) Read(p []byte) (int, error) {
+	ch := make(chan readResult)
+	go func() {
+		n, err := tr.r.Read(p)
+		ch <- readResult{n: n, err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		return res.n, res.err
+	case <-time.After(tr.timeout):
+		return 0, ErrTimeout
+	}
+}
+
+type TimeoutWriter struct {
+	w       io.Writer
+	timeout time.Duration
+}
+
+func NewTimeoutWriter(w io.Writer, timeout time.Duration) *TimeoutWriter {
+	return &TimeoutWriter{w: w, timeout: timeout}
+}
+
+func (tw *TimeoutWriter) Write(p []byte) (int, error) {
+	ch := make(chan writeResult)
+	go func() {
+		n, err := tw.w.Write(p)
+		ch <- writeResult{n: n, err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		return res.n, res.err
+	case <-time.After(tw.timeout):
+		return 0, ErrTimeout
+	}
+}
+
+type readResult struct {
+	n   int
+	err error
+}
+
+type writeResult struct {
+	n   int
+	err error
 }
