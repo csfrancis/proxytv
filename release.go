@@ -7,3 +7,7 @@ import "github.com/gin-gonic/gin"
 func SetGinMode() {
 	gin.SetMode(gin.ReleaseMode)
 }
+
+func IsDebugMode() bool {
+	return false
+}

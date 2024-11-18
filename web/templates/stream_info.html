@@ -1,0 +1,19 @@
+<div class="p-4">
+    <h3 class="text-lg font-semibold mb-5">Active Streams: {{len .ActiveStreams}} / Total Streams: {{.TotalStreams}}</h3>
+
+    <div class="flex flex-col gap-3 mt-5">
+        {{range .ActiveStreams}}
+        <div class="flex items-center p-3 bg-gray-50 dark:bg-dark-bg rounded-lg transition-colors hover:bg-gray-100" data-start-time="{{.StartTime.Unix}}" title="Started: {{.StartTime.Format "15:04:05"}}">
+            {{if .LogoURL}}
+            <img src="{{.LogoURL}}" alt="{{.Name}}" class="w-10 h-10 object-contain mr-4">
+            {{end}}
+            <div class="flex gap-x-6">
+                <div class="font-bold">{{.Name}}</div>
+                <div class="text-sm text-gray-500 content-center">{{.ClientIP}}</div>
+            </div>
+        </div>
+        {{else}}
+        <div class="text-center font-bold text-gray-500 py-5">No active streams</div>
+        {{end}}
+    </div>
+</div>

@@ -316,12 +316,6 @@ func (s *Server) streamTracker(c *gin.Context) {
 	}
 }
 
-func (s *Server) getActiveStreamCount() int {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	return len(s.streams)
-}
-
 func (s *Server) getActiveStreams() []*streamInfo {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -368,22 +362,68 @@ func (s *Server) debug() gin.HandlerFunc {
 	}
 }
 
-func (s *Server) getStreamCountData() gin.H {
-	return gin.H{
-		"ActiveStreams": s.getActiveStreamCount(),
-		"TotalStreams":  atomic.LoadInt64(&s.totalStreams),
+func (s *Server) headContent() template.HTML {
+	if IsDebugMode() {
+		return template.HTML(`<script src="/static/js/htmx.min.js?v=debug"></script>
+		<script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            bg: '#1a202c',
+                            text: '#e2e8f0',
+                        },
+                    },
+                },
+            },
+        }
+    </script>
+		<style type="text/tailwindcss">
+			@layer utilities {
+					.toggle-checkbox:checked {
+							@apply: right-0 border-green-400;
+							right: 0;
+							border-color: #68D391;
+					}
+					.toggle-checkbox:checked + .toggle-label {
+							@apply: bg-green-400;
+							background-color: #68D391;
+					}
+			}
+		</style>`)
+	} else {
+		return template.HTML(fmt.Sprintf(`<script src="/static/js/htmx.min.js?v=%[1]s"></script>
+		<link href="/static/css/output.css?v=%[1]s" rel="stylesheet">`, s.version))
 	}
 }
 
 func (s *Server) homePage() gin.HandlerFunc {
+	streamInfoData := s.getStreamInfoData()
+	streamInfoData["HeadContent"] = s.headContent()
+	if IsDebugMode() {
+		streamInfoData["Version"] = "debug"
+	} else {
+		streamInfoData["Version"] = s.version
+	}
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "base.html", s.getStreamCountData())
+		c.HTML(http.StatusOK, "base.html", streamInfoData)
 	}
 }
 
-func (s *Server) getStreamCounts() gin.HandlerFunc {
+func (s *Server) getStreamInfoData() gin.H {
+	return gin.H{
+		"ActiveStreams": s.getActiveStreams(),
+		"TotalStreams":  atomic.LoadInt64(&s.totalStreams),
+		"Now":           time.Now(),
+	}
+}
+
+func (s *Server) getStreamInfo() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "stream_counts.html", s.getStreamCountData())
+		c.HTML(http.StatusOK, "stream_info.html", s.getStreamInfoData())
 	}
 }
 
@@ -400,7 +440,7 @@ func (s *Server) Start(provider *Provider) chan error {
 	s.router.GET(fmt.Sprintf("%s:channelId", channelURIPrefix), s.streamChannel())
 	s.router.PUT("/refresh", s.refresh())
 	s.router.GET("/debug", s.debug())
-	s.router.GET("/stream-counts", s.getStreamCounts())
+	s.router.GET("/stream-info", s.getStreamInfo())
 	s.router.StaticFS("/static", static.AssetFile())
 
 	s.server = &http.Server{
