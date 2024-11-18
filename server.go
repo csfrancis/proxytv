@@ -46,6 +46,7 @@ type Server struct {
 	streams       map[*http.Request]*streamInfo
 	lock          sync.Mutex
 	version       string
+	headContent   template.HTML
 }
 
 type streamInfo struct {
@@ -113,6 +114,7 @@ func NewServer(config *Config, provider *Provider, version string) (*Server, err
 		totalStreams:  0,
 		streams:       make(map[*http.Request]*streamInfo),
 		version:       version,
+		headContent:   headContent(version),
 	}
 
 	server.router.Use(gin.LoggerWithFormatter(logrusLogFormatter))
@@ -362,7 +364,7 @@ func (s *Server) debug() gin.HandlerFunc {
 	}
 }
 
-func (s *Server) headContent() template.HTML {
+func headContent(version string) template.HTML {
 	if IsDebugMode() {
 		return template.HTML(`<script src="/static/js/htmx.min.js?v=debug"></script>
 		<script src="https://cdn.tailwindcss.com"></script>
@@ -396,19 +398,19 @@ func (s *Server) headContent() template.HTML {
 		</style>`)
 	} else {
 		return template.HTML(fmt.Sprintf(`<script src="/static/js/htmx.min.js?v=%[1]s"></script>
-		<link href="/static/css/output.css?v=%[1]s" rel="stylesheet">`, s.version))
+		<link href="/static/css/output.css?v=%[1]s" rel="stylesheet">`, version))
 	}
 }
 
 func (s *Server) homePage() gin.HandlerFunc {
-	streamInfoData := s.getStreamInfoData()
-	streamInfoData["HeadContent"] = s.headContent()
-	if IsDebugMode() {
-		streamInfoData["Version"] = "debug"
-	} else {
-		streamInfoData["Version"] = s.version
-	}
 	return func(c *gin.Context) {
+		streamInfoData := s.getStreamInfoData()
+		streamInfoData["HeadContent"] = s.headContent
+		if IsDebugMode() {
+			streamInfoData["Version"] = "debug"
+		} else {
+			streamInfoData["Version"] = s.version
+		}
 		c.HTML(http.StatusOK, "base.html", streamInfoData)
 	}
 }
