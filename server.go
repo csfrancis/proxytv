@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +30,8 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+const channelURIPrefix = "/channel/"
+
 var startTime = time.Now()
 
 type Server struct {
@@ -38,9 +42,31 @@ type Server struct {
 	useFfmpeg     bool
 	streamsSem    *semaphore.Weighted
 	maxStreams    int64
-	activeStreams int64
 	totalStreams  int64
+	streams       map[*http.Request]*streamInfo
+	lock          sync.Mutex
 	version       string
+}
+
+type streamInfo struct {
+	ClientIP  string    `json:"clientIP"`
+	ChannelID int       `json:"channelID"`
+	Name      string    `json:"name,omitempty"`
+	LogoURL   string    `json:"logoUrl,omitempty"`
+	StartTime time.Time `json:"startTime"`
+}
+
+func newStreamInfo(request *http.Request) (*streamInfo, error) {
+	channelID, err := strconv.Atoi(request.RequestURI[len(channelURIPrefix):])
+	if err != nil {
+		return nil, err
+	}
+
+	return &streamInfo{
+		ClientIP:  request.RemoteAddr,
+		ChannelID: channelID,
+		StartTime: time.Now(),
+	}, nil
 }
 
 func logrusLogFormatter(param gin.LogFormatterParams) string {
@@ -84,8 +110,8 @@ func NewServer(config *Config, provider *Provider, version string) (*Server, err
 		useFfmpeg:     config.UseFFMPEG,
 		streamsSem:    semaphore.NewWeighted(int64(config.MaxStreams)),
 		maxStreams:    int64(config.MaxStreams),
-		activeStreams: 0,
 		totalStreams:  0,
+		streams:       make(map[*http.Request]*streamInfo),
 		version:       version,
 	}
 
@@ -126,11 +152,17 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 		c.String(429, "Too many requests")
 		return
 	}
-	atomic.AddInt64(&s.activeStreams, 1)
-	defer func() {
-		s.streamsSem.Release(1)
-		atomic.AddInt64(&s.activeStreams, -1)
-	}()
+	defer s.streamsSem.Release(1)
+
+	streamInfo := s.streams[c.Request]
+	if streamInfo == nil {
+		log.Warn("no stream info found")
+	} else {
+		streamInfo.Name = track.Name
+		if logo, ok := track.Tags["tvg-logo"]; ok {
+			streamInfo.LogoURL = logo
+		}
+	}
 
 	logger := log.WithFields(log.Fields{
 		"url":       track.URI.String(),
@@ -263,6 +295,43 @@ func (s *Server) streamChannel() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) streamTracker(c *gin.Context) {
+	isStream := strings.HasPrefix(c.Request.RequestURI, channelURIPrefix)
+	if isStream {
+		s.lock.Lock()
+		if streamInfo, err := newStreamInfo(c.Request); err != nil {
+			log.WithError(err).Error("error creating stream info")
+		} else {
+			s.streams[c.Request] = streamInfo
+		}
+		s.lock.Unlock()
+	}
+
+	c.Next()
+
+	if isStream {
+		s.lock.Lock()
+		delete(s.streams, c.Request)
+		s.lock.Unlock()
+	}
+}
+
+func (s *Server) getActiveStreamCount() int {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return len(s.streams)
+}
+
+func (s *Server) getActiveStreams() []*streamInfo {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	streams := make([]*streamInfo, 0, len(s.streams))
+	for _, stream := range s.streams {
+		streams = append(streams, stream)
+	}
+	return streams
+}
+
 func (s *Server) debug() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var m runtime.MemStats
@@ -270,7 +339,7 @@ func (s *Server) debug() gin.HandlerFunc {
 
 		numGoroutines := runtime.NumGoroutine()
 		numCPU := runtime.NumCPU()
-		activeStreams := atomic.LoadInt64(&s.activeStreams)
+		activeStreams := s.getActiveStreams()
 		totalStreams := atomic.LoadInt64(&s.totalStreams)
 
 		metrics := gin.H{
@@ -301,7 +370,7 @@ func (s *Server) debug() gin.HandlerFunc {
 
 func (s *Server) getStreamCountData() gin.H {
 	return gin.H{
-		"ActiveStreams": atomic.LoadInt64(&s.activeStreams),
+		"ActiveStreams": s.getActiveStreamCount(),
 		"TotalStreams":  atomic.LoadInt64(&s.totalStreams),
 	}
 }
@@ -323,10 +392,12 @@ func (s *Server) Start(provider *Provider) chan error {
 		c.String(200, "PONG")
 	})
 
+	s.router.Use(s.streamTracker)
+
 	s.router.GET("/", s.homePage())
 	s.router.GET("/iptv.m3u", s.getIptvM3u())
 	s.router.GET("/epg.xml", s.getEpgXML())
-	s.router.GET("/channel/:channelId", s.streamChannel())
+	s.router.GET(fmt.Sprintf("%s:channelId", channelURIPrefix), s.streamChannel())
 	s.router.PUT("/refresh", s.refresh())
 	s.router.GET("/debug", s.debug())
 	s.router.GET("/stream-counts", s.getStreamCounts())
