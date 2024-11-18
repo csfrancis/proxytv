@@ -38,6 +38,7 @@ filters: # List of filters (optional)
 - `refreshInterval`: The interval at which the provider M3U and EPG files should be refreshed. Default is "12h".
 - `ffmpeg`: Whether to use FFMPEG for remuxing streams. Default is `true`.
 - `maxStreams`: The maximum number of concurrent streams. Default is `1`.
+- `userAgent`: The user agent to use for the HTTP requests. Default is the Go HTTP user agent.
 - `filters`: A list of filters to include channels based on regular expressions.
 
 ## Usage
@@ -77,6 +78,7 @@ To build the ProxyTV project, you need to have Go (1.22 or later) installed on y
     ```sh
     make setup
     ```
+2a. Install the Tailwind CSS CLI: https://tailwindcss.com/docs/installation
 
 3. Build the project:
     ```sh
