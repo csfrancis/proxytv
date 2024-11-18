@@ -129,12 +129,19 @@ func (pl *playlistLoader) OnPlaylistEnd() {
 	}
 }
 
-func loadReader(uri string) io.ReadCloser {
+func loadReader(uri string, userAgent string) io.ReadCloser {
 	var err error
 	var reader io.ReadCloser
 	logger := log.WithField("uri", uri)
 	if isURL(uri) {
-		resp, err := http.Get(uri)
+		req, err := http.NewRequest(http.MethodGet, uri, nil)
+		if err != nil {
+			logger.WithError(err).Panic("unable to create request")
+		}
+		if userAgent != "" {
+			req.Header.Set("User-Agent", userAgent)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			logger.WithError(err).Panic("unable to load uri")
 		}
@@ -158,6 +165,7 @@ type Provider struct {
 	iptvURL     string
 	epgURL      string
 	baseAddress string
+	userAgent   string
 	filters     []*Filter
 
 	playlist    *playlistLoader
@@ -171,6 +179,10 @@ func NewProvider(config *Config) (*Provider, error) {
 		iptvURL: config.IPTVUrl,
 		epgURL:  config.EPGUrl,
 		filters: config.Filters,
+	}
+
+	if len(config.UserAgent) > 0 {
+		provider.userAgent = config.UserAgent
 	}
 
 	if config.UseFFMPEG {
@@ -266,7 +278,7 @@ func (p *Provider) Refresh() error {
 	log.WithField("url", p.iptvURL).Info("loading IPTV m3u")
 
 	start := time.Now()
-	iptvReader := loadReader(p.iptvURL)
+	iptvReader := loadReader(p.iptvURL, p.userAgent)
 	defer iptvReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
 
@@ -282,7 +294,7 @@ func (p *Provider) Refresh() error {
 	log.WithField("url", p.epgURL).Info("loading EPG")
 
 	start = time.Now()
-	epgReader := loadReader(p.epgURL)
+	epgReader := loadReader(p.epgURL, p.userAgent)
 	defer epgReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded EPG")
 

@@ -36,6 +36,8 @@ type Config struct {
 	RefreshInterval    time.Duration
 	RefreshIntervalStr string `yaml:"refreshInterval,omitempty" default:"12h"`
 
+	UserAgent string `yaml:"userAgent,omitempty" default:""`
+
 	Filters []*Filter `yaml:"filters"`
 }
 
