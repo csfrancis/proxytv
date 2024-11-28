@@ -129,7 +129,7 @@ func (pl *playlistLoader) OnPlaylistEnd() {
 	}
 }
 
-func loadReader(uri string, userAgent string) io.ReadCloser {
+func loadReader(uri string, userAgent string) (io.ReadCloser, error) {
 	var err error
 	var reader io.ReadCloser
 	logger := log.WithField("uri", uri)
@@ -147,18 +147,18 @@ func loadReader(uri string, userAgent string) io.ReadCloser {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			logger.WithField("status", resp.StatusCode).Panic("invalid url response code")
+			return nil, fmt.Errorf("invalid url response code: %d", resp.StatusCode)
 		}
 
 		reader = resp.Body
 	} else {
 		reader, err = os.Open(uri)
 		if err != nil {
-			logger.WithError(err).Panic("error loading file")
+			return nil, err
 		}
 	}
 
-	return reader
+	return reader, nil
 }
 
 type Provider struct {
@@ -278,7 +278,10 @@ func (p *Provider) Refresh() error {
 	log.WithField("url", p.iptvURL).Info("loading IPTV m3u")
 
 	start := time.Now()
-	iptvReader := loadReader(p.iptvURL, p.userAgent)
+	iptvReader, err := loadReader(p.iptvURL, p.userAgent)
+	if err != nil {
+		return err
+	}
 	defer iptvReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
 
@@ -294,7 +297,10 @@ func (p *Provider) Refresh() error {
 	log.WithField("url", p.epgURL).Info("loading EPG")
 
 	start = time.Now()
-	epgReader := loadReader(p.epgURL, p.userAgent)
+	epgReader, err := loadReader(p.epgURL, p.userAgent)
+	if err != nil {
+		return err
+	}
 	defer epgReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded EPG")
 
