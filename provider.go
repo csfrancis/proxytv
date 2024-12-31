@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -119,13 +120,17 @@ func (pl *playlistLoader) OnPlaylistEnd() {
 
 	rewriteURL := len(pl.baseAddress) > 0
 
+	reXuiid := regexp.MustCompile(`xui-id="\{[^"]*\}"\s*`)
+
 	for i := range len(pl.tracks) {
 		track := pl.tracks[i]
 		uri := track.URI.String()
 		if rewriteURL {
 			uri = fmt.Sprintf("http://%s/channel/%d", pl.baseAddress, i)
 		}
-		pl.m3u.WriteString(fmt.Sprintf("%s\n%s\n", track.Raw, uri))
+		// Remove xui-id from the tags
+		fixedRaw := reXuiid.ReplaceAllString(track.Raw, "")
+		pl.m3u.WriteString(fmt.Sprintf("%s\n%s\n", fixedRaw, uri))
 	}
 }
 
