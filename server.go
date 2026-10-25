@@ -133,13 +133,16 @@ func (s *Server) getIptvM3u() gin.HandlerFunc {
 		c.Header("Content-Disposition", "attachment; filename=tv_channels.m3u")
 		c.Header("Content-Description", "File Transfer")
 		c.Header("Cache-Control", "no-cache")
-		c.Data(200, "application/octet-stream", []byte(s.provider.GetM3u()))
+		c.Header("Content-Type", "application/octet-stream")
+		http.ServeContent(c.Writer, c.Request, "tv_channels.m3u", s.provider.GetLastRefresh(), strings.NewReader(s.provider.GetM3u()))
 	}
 }
 
 func (s *Server) getEpgXML() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Data(200, "application/xml", []byte(s.provider.GetEpgXML()))
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Content-Type", "application/xml")
+		http.ServeContent(c.Writer, c.Request, "epg.xml", s.provider.GetLastRefresh(), strings.NewReader(s.provider.GetEpgXML()))
 	}
 }
 
