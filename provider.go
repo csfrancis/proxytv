@@ -76,7 +76,7 @@ func (pl *playlistLoader) OnTrack(track *Track) {
 			name := track.Name
 
 			if len(track.Tags["tvg-id"]) == 0 {
-				log.WithField("track", track).Warn("missing tvg-id")
+				log.WithField("name", track.Name).Warn("missing tvg-id")
 			}
 
 			if existingPriority, exists := pl.priorities[name]; !exists || i < existingPriority {
@@ -95,7 +95,7 @@ func (pl *playlistLoader) OnTrack(track *Track) {
 				}
 				pl.priorities[name] = i
 			} else if exists {
-				log.WithField("track", track).Warn("duplicate name")
+				log.WithField("name", track.Name).Warn("duplicate name")
 			}
 		}
 	}
@@ -172,6 +172,7 @@ type Provider struct {
 	baseAddress string
 	userAgent   string
 	filters     []*Filter
+	xtream      *XtreamConfig
 
 	playlist    *playlistLoader
 	epg         *xmltv.TV
@@ -184,6 +185,7 @@ func NewProvider(config *Config) (*Provider, error) {
 		iptvURL: config.IPTVUrl,
 		epgURL:  config.EPGUrl,
 		filters: config.Filters,
+		xtream:  config.Xtream,
 	}
 
 	if len(config.UserAgent) > 0 {
@@ -280,20 +282,28 @@ func (p *Provider) loadXMLTv(reader io.Reader) (*xmltv.TV, error) {
 
 func (p *Provider) Refresh() error {
 	var err error
-	log.WithField("url", p.iptvURL).Info("loading IPTV m3u")
 
 	start := time.Now()
-	iptvReader, err := loadReader(p.iptvURL, p.userAgent)
-	if err != nil {
-		return err
-	}
-	defer iptvReader.Close()
-	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
-
 	pl := newPlaylistLoader(p.baseAddress, p.filters)
-	err = loadM3u(iptvReader, pl)
-	if err != nil {
-		return err
+
+	if p.xtream != nil {
+		log.WithField("host", p.xtream.Host).Info("loading xtream playlist")
+		if err = loadXtreamPlaylist(p.xtream, p.userAgent, pl); err != nil {
+			return err
+		}
+		log.WithField("duration", time.Since(start)).Debug("loaded xtream playlist")
+	} else {
+		log.WithField("url", p.iptvURL).Info("loading IPTV m3u")
+		iptvReader, err := loadReader(p.iptvURL, p.userAgent)
+		if err != nil {
+			return err
+		}
+		defer iptvReader.Close()
+
+		if err = loadM3u(iptvReader, pl); err != nil {
+			return err
+		}
+		log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
 	}
 	p.playlist = pl
 

@@ -2,8 +2,10 @@ package proxytv
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/creasty/defaults"
@@ -21,10 +23,18 @@ func (f *Filter) GetRegexp() *regexp.Regexp {
 	return f.regexp
 }
 
+type XtreamConfig struct {
+	Host     string `yaml:"host"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	Output   string `yaml:"output,omitempty" default:"ts"`
+}
+
 type Config struct {
-	LogLevel string `yaml:"logLevel,omitempty" default:"info"`
-	IPTVUrl  string `yaml:"iptvUrl"`
-	EPGUrl   string `yaml:"epgUrl"`
+	LogLevel string        `yaml:"logLevel,omitempty" default:"info"`
+	IPTVUrl  string        `yaml:"iptvUrl"`
+	EPGUrl   string        `yaml:"epgUrl"`
+	Xtream   *XtreamConfig `yaml:"xtream,omitempty"`
 
 	ListenAddress string `yaml:"listenAddress,omitempty" default:":6078"`
 	ServerAddress string `yaml:"serverAddress"`
@@ -66,9 +76,27 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("invalid refreshInterval: %w", err)
 	}
 
-	if config.IPTVUrl == "" {
-		return nil, fmt.Errorf("iptvUrl is required")
+	if config.IPTVUrl == "" && config.Xtream == nil {
+		return nil, fmt.Errorf("either iptvUrl or xtream is required")
 	}
+	if config.IPTVUrl != "" && config.Xtream != nil {
+		return nil, fmt.Errorf("iptvUrl and xtream are mutually exclusive")
+	}
+
+	if config.Xtream != nil {
+		if config.Xtream.Host == "" || config.Xtream.Username == "" || config.Xtream.Password == "" {
+			return nil, fmt.Errorf("xtream requires host, username and password")
+		}
+		if config.Xtream.Output == "" {
+			config.Xtream.Output = "ts"
+		}
+		if config.EPGUrl == "" {
+			host := strings.TrimRight(config.Xtream.Host, "/")
+			config.EPGUrl = fmt.Sprintf("%s/xmltv.php?username=%s&password=%s", host,
+				url.QueryEscape(config.Xtream.Username), url.QueryEscape(config.Xtream.Password))
+		}
+	}
+
 	if config.EPGUrl == "" {
 		return nil, fmt.Errorf("epgUrl is required")
 	}
@@ -79,8 +107,10 @@ func LoadConfig(path string) (*Config, error) {
 	re := regexp.MustCompile(`^https?://`)
 	config.ServerAddress = re.ReplaceAllString(config.ServerAddress, "")
 
-	if err := validateFileOrURL(config.IPTVUrl); err != nil {
-		return nil, fmt.Errorf("invalid iptvUrl: %w", err)
+	if config.IPTVUrl != "" {
+		if err := validateFileOrURL(config.IPTVUrl); err != nil {
+			return nil, fmt.Errorf("invalid iptvUrl: %w", err)
+		}
 	}
 	if err := validateFileOrURL(config.EPGUrl); err != nil {
 		return nil, fmt.Errorf("invalid epgUrl: %w", err)

@@ -182,6 +182,97 @@ serverAddress: iptvserver:8080
 		assert.Contains(t, err.Error(), "invalid epgUrl")
 	})
 
+	// Test with an xtream config block instead of iptvUrl
+	t.Run("Valid xtream configuration with auto-derived epgUrl", func(t *testing.T) {
+		content := []byte(`
+serverAddress: iptvserver:8080
+xtream:
+  host: http://example.com
+  username: user1
+  password: pass1
+`)
+
+		tmpfile, err := os.CreateTemp("", "config*.yaml")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tmpfile.Name())
+
+		if _, err := tmpfile.Write(content); err != nil {
+			t.Fatalf("Failed to write to temp file: %v", err)
+		}
+		if err := tmpfile.Close(); err != nil {
+			t.Fatalf("Failed to close temp file: %v", err)
+		}
+
+		config, err := LoadConfig(tmpfile.Name())
+		assert.NoError(t, err)
+		assert.NotNil(t, config)
+
+		assert.Equal(t, "", config.IPTVUrl)
+		assert.NotNil(t, config.Xtream)
+		assert.Equal(t, "http://example.com", config.Xtream.Host)
+		assert.Equal(t, "user1", config.Xtream.Username)
+		assert.Equal(t, "pass1", config.Xtream.Password)
+		assert.Equal(t, "ts", config.Xtream.Output)
+		assert.Equal(t, "http://example.com/xmltv.php?username=user1&password=pass1", config.EPGUrl)
+	})
+
+	// Test that iptvUrl and xtream are mutually exclusive
+	t.Run("iptvUrl and xtream are mutually exclusive", func(t *testing.T) {
+		content := []byte(`
+iptvUrl: http://example.com/iptv
+serverAddress: iptvserver:8080
+xtream:
+  host: http://example.com
+  username: user1
+  password: pass1
+`)
+
+		tmpfile, err := os.CreateTemp("", "config*.yaml")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tmpfile.Name())
+
+		if _, err := tmpfile.Write(content); err != nil {
+			t.Fatalf("Failed to write to temp file: %v", err)
+		}
+		if err := tmpfile.Close(); err != nil {
+			t.Fatalf("Failed to close temp file: %v", err)
+		}
+
+		config, err := LoadConfig(tmpfile.Name())
+		assert.Error(t, err)
+		assert.Nil(t, config)
+		assert.Contains(t, err.Error(), "mutually exclusive")
+	})
+
+	// Test with neither iptvUrl nor xtream set
+	t.Run("missing both iptvUrl and xtream", func(t *testing.T) {
+		content := []byte(`
+serverAddress: iptvserver:8080
+`)
+
+		tmpfile, err := os.CreateTemp("", "config*.yaml")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tmpfile.Name())
+
+		if _, err := tmpfile.Write(content); err != nil {
+			t.Fatalf("Failed to write to temp file: %v", err)
+		}
+		if err := tmpfile.Close(); err != nil {
+			t.Fatalf("Failed to close temp file: %v", err)
+		}
+
+		config, err := LoadConfig(tmpfile.Name())
+		assert.Error(t, err)
+		assert.Nil(t, config)
+		assert.Contains(t, err.Error(), "either iptvUrl or xtream is required")
+	})
+
 	// Test with valid file paths for IPTV and EPG URLs
 	t.Run("Valid file paths for IPTV and EPG URLs", func(t *testing.T) {
 		// Create temporary IPTV file
