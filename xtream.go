@@ -101,7 +101,7 @@ func loadXtreamPlaylist(cfg *XtreamConfig, userAgent string, handler m3uHandler)
 			Name: stream.Name,
 			Tags: tags,
 			URI:  parsedURI,
-			Raw:  fmt.Sprintf(`#EXTINF:-1 tvg-id="%s" tvg-name="%s" group-title="%s",%s`, tags["tvg-id"], tags["tvg-name"], tags["group-title"], stream.Name),
+			Raw:  fmt.Sprintf(`#EXTINF:-1 tvg-id="%s" tvg-name="%s" tvg-logo="%s" group-title="%s",%s`, tags["tvg-id"], tags["tvg-name"], tags["tvg-logo"], tags["group-title"], stream.Name),
 		}
 		handler.OnTrack(track)
 	}
