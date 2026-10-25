@@ -14,8 +14,8 @@ To configure ProxyTV, you need to create a YAML configuration file. Below is an 
 
 ```yaml
 logLevel: "info" # Log level (optional, default: "info")
-iptvUrl: "http://example.com/get.php?username=XXX&password=XXX&output=ts&type=m3u_plus" # URL to the IPTV M3U file (required)
-epgUrl: "http://example.com/xmltv.php?username=XXX&password=XXX" # URL to the EPG XML file (required)
+iptvUrl: "http://example.com/get.php?username=XXX&password=XXX&output=ts&type=m3u_plus" # URL to the IPTV M3U file (required, unless xtream is set)
+epgUrl: "http://example.com/xmltv.php?username=XXX&password=XXX" # URL to the EPG XML file (required, unless xtream is set)
 listenAddress: ":6078" # Address to listen on (optional, default: ":6078")
 serverAddress: "localhost:6078" # Base server address (required)
 refreshInterval: "12h" # Refresh interval (optional, default: "12h")
@@ -31,8 +31,8 @@ filters: # List of filters (optional)
 ### Configuration Fields
 
 - `logLevel`: The logging level. Default is "info". Valid values are `debug`, `info`, `warn`, `error`, and `fatal`.
-- `iptvUrl`: The URL or file path to the IPTV M3U file. This field is required.
-- `epgUrl`: The URL or file path to the EPG XML file.
+- `iptvUrl`: The URL or file path to the IPTV M3U file. Required unless `xtream` is set; mutually exclusive with `xtream`.
+- `epgUrl`: The URL or file path to the EPG XML file. If `xtream` is set, this is auto-derived from the panel's `xmltv.php` endpoint when omitted.
 - `listenAddress`: The address the server will listen on. Default is ":6078".
 - `serverAddress`: The address used by the client to access the server. This field is required.
 - `refreshInterval`: The interval at which the provider M3U and EPG files should be refreshed. Default is "12h".
@@ -40,6 +40,24 @@ filters: # List of filters (optional)
 - `maxStreams`: The maximum number of concurrent streams. Default is `1`.
 - `userAgent`: The user agent to use for the HTTP requests. Default is the Go HTTP user agent.
 - `filters`: A list of filters to include channels based on regular expressions.
+- `xtream`: Fetch the channel list from an Xtream Codes panel's JSON API instead of parsing an M3U file. Useful when a panel disables its bulk M3U export (`get.php`) while leaving the Xtream app API open. Mutually exclusive with `iptvUrl`.
+  - `host`: Base URL of the Xtream panel, e.g. `"http://example.com"`.
+  - `username`: Xtream account username.
+  - `password`: Xtream account password.
+  - `output`: Stream container format requested from the panel, `ts` or `m3u8` (optional, default: `"ts"`).
+
+Example using `xtream` instead of `iptvUrl`:
+
+```yaml
+serverAddress: "localhost:6078"
+xtream:
+  host: "http://example.com"
+  username: "XXX"
+  password: "XXX"
+filters:
+  - filter: "USA \| NFL"
+    type: "group"
+```
 
 ## Usage
 
