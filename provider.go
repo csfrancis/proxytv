@@ -76,7 +76,7 @@ func (pl *playlistLoader) OnTrack(track *Track) {
 			name := track.Name
 
 			if len(track.Tags["tvg-id"]) == 0 {
-				log.WithField("track", track).Warn("missing tvg-id")
+				log.WithField("name", track.Name).Warn("missing tvg-id")
 			}
 
 			if existingPriority, exists := pl.priorities[name]; !exists || i < existingPriority {
@@ -95,7 +95,7 @@ func (pl *playlistLoader) OnTrack(track *Track) {
 				}
 				pl.priorities[name] = i
 			} else if exists {
-				log.WithField("track", track).Warn("duplicate name")
+				log.WithField("name", track.Name).Warn("duplicate name")
 			}
 		}
 	}

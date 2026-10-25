@@ -2,6 +2,7 @@ package proxytv
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -91,7 +92,8 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		if config.EPGUrl == "" {
 			host := strings.TrimRight(config.Xtream.Host, "/")
-			config.EPGUrl = fmt.Sprintf("%s/xmltv.php?username=%s&password=%s", host, config.Xtream.Username, config.Xtream.Password)
+			config.EPGUrl = fmt.Sprintf("%s/xmltv.php?username=%s&password=%s", host,
+				url.QueryEscape(config.Xtream.Username), url.QueryEscape(config.Xtream.Password))
 		}
 	}
 
