@@ -9,8 +9,10 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
 	"os/exec"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +34,13 @@ import (
 
 const channelURIPrefix = "/channel/"
 
+// streamInfoKey is the gin context key holding the *streamInfo for a stream request.
+const streamInfoKey = "streamInfo"
+
+// errStreamDisconnected is the cancellation cause used when a stream is
+// disconnected from the web UI.
+var errStreamDisconnected = errors.New("stream disconnected from web ui")
+
 var startTime = time.Now()
 
 type Server struct {
@@ -43,18 +52,24 @@ type Server struct {
 	streamsSem    *semaphore.Weighted
 	maxStreams    int64
 	totalStreams  int64
-	streams       map[*http.Request]*streamInfo
+	nextStreamID  atomic.Uint64
+	streams       map[uint64]*streamInfo
 	lock          sync.Mutex
 	version       string
 	headContent   template.HTML
 }
 
 type streamInfo struct {
+	ID        uint64    `json:"id"`
 	ClientIP  string    `json:"clientIP"`
 	ChannelID int       `json:"channelID"`
 	Name      string    `json:"name,omitempty"`
 	LogoURL   string    `json:"logoUrl,omitempty"`
 	StartTime time.Time `json:"startTime"`
+
+	// cancel ends the stream by cancelling its request context, which also
+	// kills the ffmpeg process serving it.
+	cancel context.CancelCauseFunc
 }
 
 func newStreamInfo(request *http.Request) (*streamInfo, error) {
@@ -112,7 +127,7 @@ func NewServer(config *Config, provider *Provider, version string) (*Server, err
 		streamsSem:    semaphore.NewWeighted(int64(config.MaxStreams)),
 		maxStreams:    int64(config.MaxStreams),
 		totalStreams:  0,
-		streams:       make(map[*http.Request]*streamInfo),
+		streams:       make(map[uint64]*streamInfo),
 		version:       version,
 		headContent:   headContent(version),
 	}
@@ -144,7 +159,8 @@ func (s *Server) getEpgXML() gin.HandlerFunc {
 }
 
 func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	reqCtx := c.Request.Context()
+	ctx, cancel := context.WithTimeout(reqCtx, 3*time.Second)
 	defer cancel()
 
 	if err := s.streamsSem.Acquire(ctx, 1); err != nil {
@@ -156,14 +172,16 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 	}
 	defer s.streamsSem.Release(1)
 
-	streamInfo := s.streams[c.Request]
-	if streamInfo == nil {
-		log.Warn("no stream info found")
-	} else {
+	if value, ok := c.Get(streamInfoKey); ok {
+		streamInfo := value.(*streamInfo)
+		s.lock.Lock()
 		streamInfo.Name = track.Name
 		if logo, ok := track.Tags["tvg-logo"]; ok {
 			streamInfo.LogoURL = logo
 		}
+		s.lock.Unlock()
+	} else {
+		log.Warn("no stream info found")
 	}
 
 	logger := log.WithFields(log.Fields{
@@ -175,7 +193,8 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 
 	start := time.Now()
 
-	run := exec.Command("ffmpeg", "-i", track.URI.String(), "-c:v", "copy", "-f", "mpegts", "pipe:1")
+	// Use the request context so ffmpeg is killed if the stream is disconnected.
+	run := exec.CommandContext(reqCtx, "ffmpeg", "-i", track.URI.String(), "-c:v", "copy", "-f", "mpegts", "pipe:1")
 	logger.WithField("cmd", strings.Join(run.Args, " ")).Debug("executing ffmpeg")
 	ffmpegout, err := run.StdoutPipe()
 	if err != nil {
@@ -204,36 +223,49 @@ func (s *Server) remuxStream(c *gin.Context, track *Track, channelID int) {
 
 	atomic.AddInt64(&s.totalStreams, 1)
 
+	// When the stream is cancelled (e.g. disconnected from the web UI), fail any
+	// pending write to the client immediately rather than waiting for buffered
+	// data to drain, so the client connection is dropped right away.
+	stopDeadline := context.AfterFunc(reqCtx, func() {
+		if err := http.NewResponseController(c.Writer).SetWriteDeadline(time.Now()); err != nil {
+			logger.WithError(err).Warn("unable to set write deadline")
+		}
+	})
+	defer stopDeadline()
+
 	bytesWritten := int64(0)
-	continueStream := true
 	c.Header("Content-Type", `video/mpeg; codecs="avc1.4D401E"`)
 
+	// The step function copies until ffmpeg exits or an error occurs, so the
+	// stream is finished once it returns.
 	c.Stream(func(w io.Writer) bool {
 		defer func() {
-			logger.WithFields(log.Fields{
+			fields := log.Fields{
 				"duration": time.Since(start),
 				"bytes":    bytesWritten,
-			}).Info("stopped streaming")
-			if killErr := run.Process.Kill(); killErr != nil {
+			}
+			if errors.Is(context.Cause(reqCtx), errStreamDisconnected) {
+				fields["reason"] = errStreamDisconnected.Error()
+			}
+			logger.WithFields(fields).Info("stopped streaming")
+			if killErr := run.Process.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
 				logger.WithError(killErr).Error("error killing ffmpeg")
 			}
-			continueStream = false
 		}()
 
 		timeoutReader := NewTimeoutReader(ffmpegout, 30*time.Second)
 		timeoutWriter := NewTimeoutWriter(w, 30*time.Second)
 
-		if bytesWritten, err = io.Copy(timeoutWriter, timeoutReader); err != nil {
+		// Errors after the stream has been cancelled are expected and not logged.
+		if bytesWritten, err = io.Copy(timeoutWriter, timeoutReader); err != nil && reqCtx.Err() == nil {
 			if err == ErrTimeout {
 				logger.Warn("timeout occurred during stream copy")
 			} else if !errors.Is(err, syscall.EPIPE) {
 				logger.WithError(err).Error("error when copying data")
 			}
-			continueStream = false
-			return false
 		}
 
-		return continueStream
+		return false
 	})
 }
 
@@ -298,34 +330,84 @@ func (s *Server) streamChannel() gin.HandlerFunc {
 }
 
 func (s *Server) streamTracker(c *gin.Context) {
-	isStream := strings.HasPrefix(c.Request.RequestURI, channelURIPrefix)
-	if isStream {
-		s.lock.Lock()
-		if streamInfo, err := newStreamInfo(c.Request); err != nil {
-			log.WithError(err).Error("error creating stream info")
-		} else {
-			s.streams[c.Request] = streamInfo
-		}
-		s.lock.Unlock()
+	if !strings.HasPrefix(c.Request.RequestURI, channelURIPrefix) {
+		c.Next()
+		return
 	}
+
+	streamInfo, err := newStreamInfo(c.Request)
+	if err != nil {
+		log.WithError(err).Error("error creating stream info")
+		c.Next()
+		return
+	}
+
+	ctx, cancel := context.WithCancelCause(c.Request.Context())
+	defer cancel(nil)
+	c.Request = c.Request.WithContext(ctx)
+
+	streamInfo.ID = s.nextStreamID.Add(1)
+	streamInfo.cancel = cancel
+	c.Set(streamInfoKey, streamInfo)
+
+	s.lock.Lock()
+	s.streams[streamInfo.ID] = streamInfo
+	s.lock.Unlock()
+
+	defer func() {
+		s.lock.Lock()
+		delete(s.streams, streamInfo.ID)
+		s.lock.Unlock()
+	}()
 
 	c.Next()
-
-	if isStream {
-		s.lock.Lock()
-		delete(s.streams, c.Request)
-		s.lock.Unlock()
-	}
 }
 
-func (s *Server) getActiveStreams() []*streamInfo {
+// getActiveStreams returns a snapshot of the active streams, oldest first.
+func (s *Server) getActiveStreams() []streamInfo {
 	s.lock.Lock()
-	defer s.lock.Unlock()
-	streams := make([]*streamInfo, 0, len(s.streams))
+	streams := make([]streamInfo, 0, len(s.streams))
 	for _, stream := range s.streams {
-		streams = append(streams, stream)
+		streams = append(streams, *stream)
 	}
+	s.lock.Unlock()
+
+	sort.Slice(streams, func(i, j int) bool { return streams[i].ID < streams[j].ID })
 	return streams
+}
+
+// disconnectStream ends an active stream and responds with the updated stream list.
+func (s *Server) disconnectStream() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		streamID, err := strconv.ParseUint(c.Param("streamId"), 10, 64)
+		if err != nil {
+			log.WithError(err).Warn("invalid streamId")
+			c.String(http.StatusBadRequest, "Invalid stream id")
+			return
+		}
+
+		// Remove the stream from the list immediately so the UI reflects the
+		// disconnect; the stream's own handler finishes shutting down ffmpeg.
+		s.lock.Lock()
+		stream, ok := s.streams[streamID]
+		if ok {
+			delete(s.streams, streamID)
+		}
+		s.lock.Unlock()
+
+		if ok {
+			log.WithFields(log.Fields{
+				"streamId":  streamID,
+				"channelId": stream.ChannelID,
+				"clientIP":  stream.ClientIP,
+			}).Info("disconnecting stream")
+			stream.cancel(errStreamDisconnected)
+		} else {
+			log.WithField("streamId", streamID).Warn("stream not found")
+		}
+
+		c.HTML(http.StatusOK, "stream_info.html", s.getStreamInfoData())
+	}
 }
 
 func (s *Server) debug() gin.HandlerFunc {
@@ -443,6 +525,7 @@ func (s *Server) Start(provider *Provider) chan error {
 	s.router.PUT("/refresh", s.refresh())
 	s.router.GET("/debug", s.debug())
 	s.router.GET("/stream-info", s.getStreamInfo())
+	s.router.DELETE("/streams/:streamId", s.disconnectStream())
 	s.router.StaticFS("/static", static.AssetFile())
 
 	s.server = &http.Server{

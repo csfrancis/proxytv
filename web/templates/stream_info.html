@@ -11,6 +11,10 @@
                 <div class="font-bold">{{.Name}}</div>
                 <div class="text-sm text-gray-500 content-center">{{.ClientIP}}</div>
             </div>
+            <button hx-delete="/streams/{{.ID}}" hx-target="#stream-info" hx-confirm="Disconnect {{.ClientIP}} from {{if .Name}}{{.Name}}{{else}}this stream{{end}}?"
+                class="ml-auto bg-red-500 hover:bg-red-600 text-white text-sm px-3 py-1 rounded transition duration-300">
+                Disconnect
+            </button>
         </div>
         {{else}}
         <div class="text-center font-bold text-gray-500 py-5">No active streams</div>
