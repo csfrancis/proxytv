@@ -58,15 +58,19 @@ Configure your IPTV client to point to the server address in the config file. Fo
 
 ProxyTV provides several HTTP endpoints for interacting with the server:
 
+- `GET /`: Web dashboard showing active streams, with actions to refresh the provider and disconnect streams.
 - `GET /ping`: Returns "PONG" to check if the server is running.
+- `GET /debug`: Returns server metrics as JSON, including version, uptime, memory usage, active streams, and the last provider refresh time.
+- `GET /stream-info`: Returns the active stream list as an HTML fragment (used by the web dashboard).
 - `GET /iptv.m3u`: Downloads the IPTV M3U file.
 - `GET /epg.xml`: Downloads the EPG XML file.
 - `GET /channel/:channelId`: Streams the specified channel by its ID.
 - `PUT /refresh`: Refreshes the provider data.
+- `DELETE /streams/:streamId`: Disconnects the specified active stream. Stream IDs are listed under `streams.active` in the `GET /debug` response, and streams can also be disconnected from the web UI.
 
 ## Building the Project
 
-To build the ProxyTV project, you need to have Go (1.22 or later) installed on your machine. Follow the steps below to build the project:
+To build the ProxyTV project, you need to have Go (1.23 or later) installed on your machine. Follow the steps below to build the project:
 
 1. Clone the repository:
     ```sh
