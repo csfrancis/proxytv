@@ -1,6 +1,8 @@
 package proxytv
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -144,4 +146,117 @@ http://test.com:6078/channel/1
 			}
 		})
 	}
+}
+
+const refreshTestM3u = `#EXTM3U
+#EXTINF:-1 tvg-id="id1" tvg-name="name1",Channel 1
+http://example.com/channel1
+`
+
+const refreshTestEpg = `<?xml version="1.0" encoding="UTF-8"?>
+<tv><channel id="id1"><display-name>Channel 1</display-name></channel></tv>
+`
+
+// newRefreshTestServer serves the playlist and EPG, with the EPG response
+// controlled by epgStatus and epgBody so tests can make it fail.
+func newRefreshTestServer(t *testing.T, epgStatus *int, epgBody *string) *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/iptv.m3u", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(refreshTestM3u))
+	})
+	mux.HandleFunc("/epg.xml", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(*epgStatus)
+		_, _ = w.Write([]byte(*epgBody))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+func newRefreshTestProvider(t *testing.T, iptvURL, epgURL string) *Provider {
+	config := &Config{
+		IPTVUrl: iptvURL,
+		EPGUrl:  epgURL,
+		Filters: []*Filter{{Type: "id", Value: ".*"}},
+	}
+	assert.NoError(t, config.compileFilterRegexps())
+	provider, err := NewProvider(config)
+	assert.NoError(t, err)
+	return provider
+}
+
+func TestProviderRefreshUnreachableURLReturnsError(t *testing.T) {
+	// Grab a free address and close the listener so connections are refused.
+	server := httptest.NewServer(http.NotFoundHandler())
+	url := server.URL
+	server.Close()
+
+	provider := newRefreshTestProvider(t, url+"/iptv.m3u", url+"/epg.xml")
+
+	assert.NotPanics(t, func() {
+		assert.Error(t, provider.Refresh())
+	})
+}
+
+func TestProviderRefreshFailureKeepsPreviousData(t *testing.T) {
+	epgStatus := http.StatusOK
+	epgBody := refreshTestEpg
+	server := newRefreshTestServer(t, &epgStatus, &epgBody)
+
+	provider := newRefreshTestProvider(t, server.URL+"/iptv.m3u", server.URL+"/epg.xml")
+	assert.NoError(t, provider.Refresh())
+
+	m3u := provider.GetM3u()
+	epg := provider.GetEpgXML()
+	lastRefresh := provider.GetLastRefresh()
+	assert.Contains(t, m3u, "Channel 1")
+	assert.Contains(t, epg, `<channel id="id1">`)
+
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "non-200 EPG response", status: http.StatusInternalServerError, body: "oops"},
+		{name: "truncated EPG", status: http.StatusOK, body: `<?xml version="1.0"?><tv><channel id="id1"><display-name>Chan`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			epgStatus = tt.status
+			epgBody = tt.body
+
+			assert.Error(t, provider.Refresh())
+			assert.Equal(t, m3u, provider.GetM3u())
+			assert.Equal(t, epg, provider.GetEpgXML())
+			assert.Equal(t, lastRefresh, provider.GetLastRefresh())
+		})
+	}
+}
+
+func TestProviderGetTrackOutOfRange(t *testing.T) {
+	provider := newRefreshTestProvider(t, "", "")
+	assert.Same(t, &trackNotFound, provider.GetTrack(0))
+
+	epgStatus := http.StatusOK
+	epgBody := refreshTestEpg
+	server := newRefreshTestServer(t, &epgStatus, &epgBody)
+	provider = newRefreshTestProvider(t, server.URL+"/iptv.m3u", server.URL+"/epg.xml")
+	assert.NoError(t, provider.Refresh())
+
+	assert.Equal(t, "Channel 1", provider.GetTrack(0).Name)
+	assert.Same(t, &trackNotFound, provider.GetTrack(1))
+	assert.Same(t, &trackNotFound, provider.GetTrack(-1))
+}
+
+func TestProviderRefreshISO88591Epg(t *testing.T) {
+	// "Télé" encoded as ISO-8859-1 (é = 0xE9).
+	epgBody := "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n" +
+		"<tv><channel id=\"id1\"><display-name>T\xe9l\xe9</display-name></channel></tv>\n"
+	epgStatus := http.StatusOK
+	server := newRefreshTestServer(t, &epgStatus, &epgBody)
+
+	provider := newRefreshTestProvider(t, server.URL+"/iptv.m3u", server.URL+"/epg.xml")
+	assert.NoError(t, provider.Refresh())
+	assert.Contains(t, provider.GetEpgXML(), "<display-name>Télé</display-name>")
 }

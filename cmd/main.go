@@ -138,8 +138,10 @@ func main() {
 			exit = true
 		case <-refreshTicker.C:
 			log.Info("refreshing provider")
+			// A failed refresh leaves the previously loaded data in place, so
+			// keep serving it and try again on the next tick.
 			if err := provider.Refresh(); err != nil {
-				log.WithError(err).Error("failed to refresh provider")
+				log.WithError(err).Warn("failed to refresh provider, continuing with existing data")
 			}
 		}
 	}

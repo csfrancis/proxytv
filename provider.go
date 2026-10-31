@@ -4,14 +4,17 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/csfrancis/proxytv/xmltv"
+	"golang.org/x/net/html/charset"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -134,36 +137,47 @@ func (pl *playlistLoader) OnPlaylistEnd() {
 	}
 }
 
+// httpClient is used to fetch the IPTV playlist and EPG. The transport-level
+// timeouts make an unresponsive provider fail fast, while the overall timeout is
+// generous enough to allow large EPG downloads but still bounds a stalled body.
+var httpClient = &http.Client{
+	Timeout: 10 * time.Minute,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 2 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+	},
+}
+
 func loadReader(uri string, userAgent string) (io.ReadCloser, error) {
-	var err error
-	var reader io.ReadCloser
-	logger := log.WithField("uri", uri)
-	if isURL(uri) {
-		req, err := http.NewRequest(http.MethodGet, uri, nil)
-		if err != nil {
-			logger.WithError(err).Panic("unable to create request")
-		}
-		if userAgent != "" {
-			req.Header.Set("User-Agent", userAgent)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			logger.WithError(err).Panic("unable to load uri")
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("invalid url response code: %d", resp.StatusCode)
-		}
-
-		reader = resp.Body
-	} else {
-		reader, err = os.Open(uri)
-		if err != nil {
-			return nil, err
-		}
+	if !isURL(uri) {
+		return os.Open(uri)
 	}
 
-	return reader, nil
+	req, err := http.NewRequest(http.MethodGet, uri, nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create request: %w", err)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("unable to load uri: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("invalid url response code: %d", resp.StatusCode)
+	}
+
+	return resp.Body, nil
 }
 
 type Provider struct {
@@ -173,6 +187,9 @@ type Provider struct {
 	userAgent   string
 	filters     []*Filter
 
+	// lock guards the fields below, which are replaced as a unit by Refresh
+	// and read concurrently by the HTTP server.
+	lock        sync.RWMutex
 	playlist    *playlistLoader
 	epg         *xmltv.TV
 	epgData     []byte
@@ -197,11 +214,11 @@ func NewProvider(config *Config) (*Provider, error) {
 	return provider, nil
 }
 
-func (p *Provider) loadXMLTv(reader io.Reader) (*xmltv.TV, error) {
+func loadXMLTv(reader io.Reader, tracks []Track) (*xmltv.TV, error) {
 	start := time.Now()
 
 	channels := make(map[string]bool)
-	for _, track := range p.playlist.tracks {
+	for _, track := range tracks {
 		id := track.Tags["tvg-id"]
 		if len(id) == 0 {
 			continue
@@ -210,6 +227,8 @@ func (p *Provider) loadXMLTv(reader io.Reader) (*xmltv.TV, error) {
 	}
 
 	decoder := xml.NewDecoder(reader)
+	// XMLTV feeds commonly declare non-UTF-8 encodings such as ISO-8859-1.
+	decoder.CharsetReader = charset.NewReaderLabel
 	tvSetup := new(xmltv.TV)
 
 	totalChannelCount := 0
@@ -218,8 +237,13 @@ func (p *Provider) loadXMLTv(reader io.Reader) (*xmltv.TV, error) {
 	for {
 		// Decode the next XML token
 		tok, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
-			break // Exit on EOF or error
+			// Don't treat a truncated or corrupt EPG (e.g. a dropped connection
+			// mid-download) as a successful load.
+			return nil, err
 		}
 
 		// Process the start element
@@ -278,8 +302,9 @@ func (p *Provider) loadXMLTv(reader io.Reader) (*xmltv.TV, error) {
 	return tvSetup, nil
 }
 
+// Refresh reloads the playlist and EPG. Everything is loaded before any state is
+// replaced, so if any step fails the previously loaded data continues to be served.
 func (p *Provider) Refresh() error {
-	var err error
 	log.WithField("url", p.iptvURL).Info("loading IPTV m3u")
 
 	start := time.Now()
@@ -291,13 +316,11 @@ func (p *Provider) Refresh() error {
 	log.WithField("duration", time.Since(start)).Debug("loaded IPTV m3u")
 
 	pl := newPlaylistLoader(p.baseAddress, p.filters)
-	err = loadM3u(iptvReader, pl)
-	if err != nil {
+	if err := loadM3u(iptvReader, pl); err != nil {
 		return err
 	}
-	p.playlist = pl
 
-	log.WithField("channelCount", len(p.playlist.tracks)).Info("parsed IPTV m3u")
+	log.WithField("channelCount", len(pl.tracks)).Info("parsed IPTV m3u")
 
 	log.WithField("url", p.epgURL).Info("loading EPG")
 
@@ -309,41 +332,59 @@ func (p *Provider) Refresh() error {
 	defer epgReader.Close()
 	log.WithField("duration", time.Since(start)).Debug("loaded EPG")
 
-	p.epg, err = p.loadXMLTv(epgReader)
+	epg, err := loadXMLTv(epgReader, pl.tracks)
 	if err != nil {
 		return err
 	}
 
-	xmlData, err := xml.Marshal(p.epg)
+	xmlData, err := xml.Marshal(epg)
 	if err != nil {
 		return err
 	}
 
 	xmlHeader := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE tv SYSTEM \"xmltv.dtd\">")
-	p.epgData = append(xmlHeader, xmlData...)
+	epgData := append(xmlHeader, xmlData...)
 
+	p.lock.Lock()
+	p.playlist = pl
+	p.epg = epg
+	p.epgData = epgData
 	p.lastRefresh = time.Now()
+	p.lock.Unlock()
 
 	return nil
 }
 
 func (p *Provider) GetM3u() string {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if p.playlist == nil {
+		return ""
+	}
 	return p.playlist.m3u.String()
 }
 
 func (p *Provider) GetEpgXML() string {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
 	return string(p.epgData)
 }
 
 var trackNotFound = Track{}
 
 func (p *Provider) GetTrack(idx int) *Track {
-	if idx >= len(p.playlist.tracks) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if p.playlist == nil || idx < 0 || idx >= len(p.playlist.tracks) {
 		return &trackNotFound
 	}
+	// The returned pointer stays valid after a refresh: Refresh swaps in a new
+	// playlist rather than modifying the existing tracks slice.
 	return &p.playlist.tracks[idx]
 }
 
 func (p *Provider) GetLastRefresh() time.Time {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
 	return p.lastRefresh
 }
